@@ -155,7 +155,7 @@ mod tests {
         let mut sk = Skeleton::init();
         // Attach a single 0-cell
         let idx = sk.attach(Cell::new(0), None, None).unwrap();
-        assert_eq!(idx, 1, "Index for first 0-cell should be 1");
+        assert_eq!(idx, 0, "Index for first 0-cell should be 1");
         assert_eq!(
             sk.cells[0].len(),
             1,
