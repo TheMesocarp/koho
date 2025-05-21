@@ -9,9 +9,6 @@ pub struct Vector {
 
 impl Vector {
     pub fn new(tensor: Tensor, device: Device, dtype: DType) -> Result<Self> {
-        if tensor.rank() != 2 {
-            return Err(Error::Msg("Vector must be rank 1".into()));
-        }
         Ok(Self {
             tensor,
             device,
@@ -251,14 +248,10 @@ impl Matrix {
         let (_, cols) = self.shape();
         let mut cols_vectors = Vec::with_capacity(cols);
 
-        // Candle's `chunk` method can split a tensor along a dimension.
-        // Splitting along dim 0 (rows) into `rows` chunks will give each row.
         let cols_tensors = self.tensor.chunk(cols, 1)?;
 
         for col_tensor in cols_tensors {
-            // Each chunk will be a tensor of shape (1, cols). Reshape to (cols,) for Vector.
-            let reshaped_col = col_tensor.squeeze(1)?; // Squeeze out the 1 dimension
-            cols_vectors.push(Vector::new(reshaped_col, self.device.clone(), self.dtype)?);
+            cols_vectors.push(Vector::new(col_tensor, self.device.clone(), self.dtype)?);
         }
 
         Ok(cols_vectors)
@@ -402,6 +395,77 @@ mod tests {
         let norm_tensor = m.frobenius_norm()?;
         let norm_val = norm_tensor.to_scalar::<f32>()?;
         assert!((norm_val - 13.0).abs() < 1e-6);
+        Ok(())
+    }
+
+    #[test]
+    fn test_matrix_vector_multiplication() -> Result<()> {
+        let device = Device::Cpu;
+        let dtype = DType::F32;
+        
+        // Create a 2x3 matrix
+        let matrix = Matrix::from_slice(
+            &[1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0],
+            2,
+            3,
+            device.clone(),
+            dtype,
+        )?;
+        
+        // Create a 3x1 vector
+        let vector = Vector::from_slice(
+            &[7.0f32, 8.0, 9.0],
+            3,
+            device.clone(),
+            dtype,
+        )?;
+        
+        // Perform matrix-vector multiplication
+        let result = matrix.matvec(&vector)?;
+        let squeezed = result.inner().squeeze(1)?;
+        // Check dimensions of result
+        assert_eq!(result.dimension(), 2);
+        
+        // Expected result:
+        // [1.0, 2.0, 3.0]   [7.0]   [1.0*7.0 + 2.0*8.0 + 3.0*9.0]   [50.0]
+        // [4.0, 5.0, 6.0] × [8.0] = [4.0*7.0 + 5.0*8.0 + 6.0*9.0] = [122.0]
+        //                   [9.0]
+        
+        // Convert result to a vector and verify values
+        let result_vec = squeezed.to_vec1::<f32>()?;
+        assert_eq!(result_vec.len(), 2);
+        assert!((result_vec[0] - 50.0).abs() < 1e-6);
+        assert!((result_vec[1] - 122.0).abs() < 1e-6);
+        
+        Ok(())
+    }
+
+    #[test]
+    fn test_matrix_vector_dimension_mismatch() -> Result<()> {
+        let device = Device::Cpu;
+        let dtype = DType::F32;
+        
+        // Create a 2x3 matrix
+        let matrix = Matrix::from_slice(
+            &[1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0],
+            2,
+            3,
+            device.clone(),
+            dtype,
+        )?;
+        
+        // Create a vector with incorrect dimension (2 instead of 3)
+        let vector = Vector::from_slice(
+            &[7.0f32, 8.0],
+            2,
+            device.clone(),
+            dtype,
+        )?;
+        
+        // Attempt matrix-vector multiplication should fail
+        let result = matrix.matvec(&vector);
+        assert!(result.is_err());
+        
         Ok(())
     }
 }

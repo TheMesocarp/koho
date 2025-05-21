@@ -455,9 +455,7 @@ mod tests {
         assert_eq!(result.len(), 1, "Should have one 1-cell");
 
         // Verify edge value: 1*1.0 (from v0) + (-1)*2.0 (from v1) = -1.0
-        let edge_value = result[0]
-            .inner()
-            .to_vec1::<f32>().map_err(KohoError::Candle)?[0];
+        let edge_value = result[0].inner().squeeze(1).map_err(KohoError::Candle)?.to_vec1::<f32>().map_err(KohoError::Candle)?[0];
         assert!(
             (edge_value - (-1.0f32)).abs() < 1e-6,
             "Edge value mismatch, got: {}",
