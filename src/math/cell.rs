@@ -123,7 +123,7 @@ impl Skeleton {
         if cell.dimension < self.cells.len() {
             self.cells[cell.dimension].push(cell);
         }
-        Ok(self.cells[incoming_dim as usize].len())
+        Ok(self.cells[incoming_dim as usize].len()-1)
     }
 
     /// Returns the collection of incident cells to `cell_idx` with exactly 1 dimension difference.
@@ -131,7 +131,7 @@ impl Skeleton {
     /// This separates boundary relationships (cells of dimension k-1, forming the boundary)
     /// from coboundary relationships (cells of dimension k+1, having this cell in their boundary).
     /// This distinction is important for homology and cohomology calculations.
-    pub fn incidences(&self, k: usize, cell_idx: usize) -> Result<(&[usize], &[usize]), KohoError> {
+    pub fn incidences(&self, k: usize, cell_idx: usize) -> Result<(&Vec<usize>, &Vec<usize>), KohoError> {
         if k >= self.cells.len() {
             return Err(KohoError::DimensionMismatch);
         }

@@ -153,6 +153,7 @@ impl CellularSheaf {
         k_cochain: Vec<Vector>,
         stalk_dim_output: usize,
     ) -> Result<Vec<Vector>, KohoError> {
+        println!("here at least");
         let num_k_plus_1_cells = self.cells.cells.get(k + 1).map_or(0, |cells| cells.len());
         if num_k_plus_1_cells == 0 && k + 1 < self.cells.cells.len() {
             return Ok(Vec::new());
@@ -171,8 +172,8 @@ impl CellularSheaf {
         ];
         let tau_dim = k + 1;
         for (sigma_idx, section) in k_cochain.iter().enumerate() {
-            let (_, upper) = &self.cells.incidences(k, sigma_idx)?;
-            for i in *upper {
+            let (upper, _) = self.cells.incidences(k, sigma_idx)?;
+            for i in upper {
                 if let Some(r) = self.restrictions.get(&(k, sigma_idx, tau_dim, *i)) {
                     let mut term = r.matvec(section).map_err(KohoError::Candle)?;
 
@@ -185,6 +186,7 @@ impl CellularSheaf {
                     output_k_plus_1_cochain[*i] = output_k_plus_1_cochain[*i]
                         .add(&term)
                         .map_err(KohoError::Candle)?;
+                    continue;
                 }
             }
         }
@@ -409,4 +411,60 @@ mod tests {
         // Should be a 1x1 matrix containing [3.0]
         assert_eq!(&[mat.rows(), mat.cols()], &[1, 1]);
     }
+
+    // Helper function to create a simple sheaf with two vertices and an edge
+    fn setup_simple_sheaf() -> Result<CellularSheaf, KohoError> {
+        let mut sheaf = CellularSheaf::init(DType::F32, Device::Cpu);
+        
+        // Attach two 0-cells (vertices)
+        let v0_data = Section::new(&[1.0f32], 1, Device::Cpu, DType::F32).map_err(KohoError::Candle)?;
+        let (_, v0_idx) = sheaf.attach(Cell::new(0), v0_data, None, None)?;
+        
+        let v1_data = Section::new(&[2.0f32], 1, Device::Cpu, DType::F32).map_err(KohoError::Candle)?;
+        let (_, v1_idx) = sheaf.attach(Cell::new(0), v1_data, None, None)?;
+
+        // Attach 1-cell (edge) connecting vertices
+        let e_data = Section::new(&[0.0f32], 1, Device::Cpu, DType::F32).map_err(KohoError::Candle)?;
+        let (_, e_idx) = sheaf.attach(
+            Cell::new(1), 
+            e_data, 
+            None, 
+            Some(&[v0_idx, v1_idx])
+        )?;
+
+        // Set restriction maps (vertex -> edge maps)
+        let r_v0 = Matrix::from_slice(&[1.0f32], 1, 1, Device::Cpu, DType::F32).map_err(KohoError::Candle)?;
+        sheaf.set_restriction(0, v0_idx, e_idx, r_v0, 1)?;
+
+        let r_v1 = Matrix::from_slice(&[-1.0f32], 1, 1, Device::Cpu, DType::F32).map_err(KohoError::Candle)?;
+        sheaf.set_restriction(0, v1_idx, e_idx, r_v1, 1)?;
+
+        Ok(sheaf)
+    }
+
+    #[test]
+    fn test_coboundary_computation() -> Result<(), KohoError> {
+        let sheaf = setup_simple_sheaf()?;
+        
+        // Get 0-cochain (vertex data)
+        let k_cochain = sheaf.get_k_cochain(0)?.to_vectors().map_err(KohoError::Candle)?;
+        assert_eq!(k_cochain.len(), 2, "Should have two 0-cells");
+
+        // Compute coboundary (should produce edge data)
+        let result = sheaf.k_coboundary(0, k_cochain, 1)?;
+        assert_eq!(result.len(), 1, "Should have one 1-cell");
+
+        // Verify edge value: 1*1.0 (from v0) + (-1)*2.0 (from v1) = -1.0
+        let edge_value = result[0]
+            .inner()
+            .to_vec1::<f32>().map_err(KohoError::Candle)?[0];
+        assert!(
+            (edge_value - (-1.0f32)).abs() < 1e-6,
+            "Edge value mismatch, got: {}",
+            edge_value
+        );
+
+        Ok(())
+    }
+
 }

@@ -9,7 +9,7 @@ pub struct Vector {
 
 impl Vector {
     pub fn new(tensor: Tensor, device: Device, dtype: DType) -> Result<Self> {
-        if tensor.rank() != 1 {
+        if tensor.rank() != 2 {
             return Err(Error::Msg("Vector must be rank 1".into()));
         }
         Ok(Self {
@@ -25,7 +25,7 @@ impl Vector {
         device: Device,
         dtype: DType,
     ) -> Result<Self> {
-        let t = Tensor::from_slice(data, &[dimension], &device)?;
+        let t = Tensor::from_slice(data, (dimension, 1), &device)?;
         Self::new(t, device, dtype)
     }
 
