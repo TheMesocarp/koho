@@ -6,7 +6,7 @@
 
 use candle_core::{Tensor, Var};
 use error::KohoError;
-use math::{cell::OpenSet, tensors::Matrix};
+use math::tensors::Matrix;
 use nn::{
     diffuse::DiffusionLayer,
     loss::{LossFn, LossKind},
@@ -33,9 +33,9 @@ pub trait Parameterized {
 /// on a cellular sheaf, learning representations that respect the underlying
 /// topological structure. It includes complete training functionality with
 /// configurable optimizers and loss functions.
-pub struct SheafNN<O: OpenSet> {
+pub struct SheafNN {
     /// The sequence of diffusion layers in the network
-    layers: Vec<DiffusionLayer<O>>,
+    layers: Vec<DiffusionLayer>,
     /// The loss function used for training
     loss_fn: LossFn,
     /// The optimizer used for parameter updates
@@ -44,7 +44,7 @@ pub struct SheafNN<O: OpenSet> {
     k: usize,
 }
 
-impl<O: OpenSet> SheafNN<O> {
+impl SheafNN {
     /// Creates a new sheaf neural network with the specified diffusion layers and loss type.
     ///
     /// # Arguments
@@ -54,7 +54,7 @@ impl<O: OpenSet> SheafNN<O> {
     ///
     /// # Returns
     /// A new SheafNN with default optimizer
-    pub fn sequential(k: usize, layers: Vec<DiffusionLayer<O>>, loss: LossKind) -> Self {
+    pub fn sequential(k: usize, layers: Vec<DiffusionLayer>, loss: LossKind) -> Self {
         let loss_fn = LossFn::new(loss);
         Self {
             layers,
@@ -185,7 +185,7 @@ impl<O: OpenSet> SheafNN<O> {
     }
 }
 
-impl<O: OpenSet> Parameterized for SheafNN<O> {
+impl Parameterized for SheafNN {
     /// Returns all learnable parameters across all layers of the network.
     ///
     /// # Returns
