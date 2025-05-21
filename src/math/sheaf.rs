@@ -12,7 +12,7 @@ use std::collections::HashMap;
 use crate::{
     error::KohoError,
     math::{
-        cell::{Cell, OpenSet, Skeleton},
+        cell::{Cell, Skeleton},
         tensors::{Matrix, Vector},
     },
 };
@@ -43,9 +43,9 @@ impl Section {
 /// Cellular sheaves assign data (vector spaces) to cells in a cell complex,
 /// along with restriction maps that specify how data on higher-dimensional cells
 /// relates to data on lower-dimensional cells.
-pub struct CellularSheaf<O: OpenSet> {
+pub struct CellularSheaf {
     /// The underlying cell complex structure
-    pub cells: Skeleton<O>,
+    pub cells: Skeleton,
     /// Vector spaces (stalks) assigned to each cell, organized by dimension
     pub section_spaces: Vec<Vec<Section>>,
     /// Maps between vector spaces on different cells (restriction maps)
@@ -60,7 +60,7 @@ pub struct CellularSheaf<O: OpenSet> {
     pub dtype: DType,
 }
 
-impl<O: OpenSet> CellularSheaf<O> {
+impl CellularSheaf {
     /// Initializes a new, empty cellular sheaf.
     ///
     /// # Arguments
@@ -86,15 +86,23 @@ impl<O: OpenSet> CellularSheaf<O> {
     ///
     /// # Returns
     /// A tuple of the dimension and index of the newly attached cell
-    pub fn attach(&mut self, cell: Cell<O>, data: Section) -> Result<(usize, usize), KohoError> {
+    pub fn attach(
+        &mut self,
+        cell: Cell,
+        data: Section,
+        upper: Option<&[usize]>,
+        lower: Option<&[usize]>,
+    ) -> Result<(usize, usize), KohoError> {
         let k = cell.dimension;
-        let idx = self.cells.attach(cell)?;
+        let idx = self.cells.attach(cell, upper, lower)?;
         let current_dim = self.section_spaces.len();
         if current_dim < k {
             return Err(KohoError::DimensionMismatch);
         } else if current_dim == k {
             self.section_spaces.push(vec![data]);
+            return Ok((k, idx));
         }
+        self.section_spaces[k].push(data);
         Ok((k, idx))
     }
 
@@ -113,21 +121,17 @@ impl<O: OpenSet> CellularSheaf<O> {
         &mut self,
         k: usize,
         cell_id: usize,
-        final_k: usize,
-        final_cell: usize,
+        higher_cell: usize,
         map: Matrix,
         interlink: i8,
     ) -> Result<(), KohoError> {
-        if cell_id >= self.cells.cells[k].len() || final_cell >= self.cells.cells[k].len() {
+        if cell_id >= self.cells.cells[k].len() || higher_cell >= self.cells.cells[k + 1].len() {
             return Err(KohoError::InvalidCellIdx);
         }
-        if self.cells.cells[k][cell_id].dimension >= self.cells.cells[k][final_cell].dimension {
-            return Err(KohoError::NoRestrictionDefined);
-        }
         self.restrictions
-            .insert((k, cell_id, final_k, final_cell), map);
+            .insert((k, cell_id, k + 1, higher_cell), map);
         self.interlinked
-            .insert((k, cell_id, final_k, final_cell), interlink);
+            .insert((k, cell_id, k + 1, higher_cell), interlink);
         Ok(())
     }
 
@@ -165,34 +169,22 @@ impl<O: OpenSet> CellularSheaf<O> {
             .map_err(KohoError::Candle)?;
             num_k_plus_1_cells
         ];
-        for (tau_idx, tau) in output_k_plus_1_cochain
-            .iter_mut()
-            .enumerate()
-            .take(num_k_plus_1_cells)
-        {
-            let tau_cell_dim = k + 1;
-            let (lower_incident_cells, _) =
-                &self.cells.filter_incident_by_dim(tau_cell_dim, tau_idx)?;
-            for (sigma_dim, sigma_idx) in lower_incident_cells {
-                if *sigma_dim != k {
-                    continue;
-                }
-                let x_sigma = &k_cochain[*sigma_idx];
-                if let Some(r) =
-                    self.restrictions
-                        .get(&(*sigma_dim, *sigma_idx, tau_cell_dim, tau_idx))
-                {
-                    let mut term = r.matvec(x_sigma).map_err(KohoError::Candle)?;
+        let tau_dim = k + 1;
+        for (sigma_idx, section) in k_cochain.iter().enumerate() {
+            let (_, upper) = &self.cells.incidences(k, sigma_idx)?;
+            for i in *upper {
+                if let Some(r) = self.restrictions.get(&(k, sigma_idx, tau_dim, *i)) {
+                    let mut term = r.matvec(section).map_err(KohoError::Candle)?;
 
-                    if let Some(incidence_sign) =
-                        self.interlinked
-                            .get(&(*sigma_dim, *sigma_idx, tau_cell_dim, tau_idx))
+                    if let Some(incidence_sign) = self.interlinked.get(&(k, sigma_idx, tau_dim, *i))
                     {
                         if *incidence_sign < 0 {
                             term = term.scale(-1.0).map_err(KohoError::Candle)?;
                         }
                     }
-                    *tau = tau.add(&term).map_err(KohoError::Candle)?;
+                    output_k_plus_1_cochain[*i] = output_k_plus_1_cochain[*i]
+                        .add(&term)
+                        .map_err(KohoError::Candle)?;
                 }
             }
         }
@@ -238,17 +230,12 @@ impl<O: OpenSet> CellularSheaf<O> {
         for (tau_idx, y_tau) in k_coboundary_output.iter().enumerate() {
             let tau_cell_dim = k + 1;
 
-            let (lower_incident_cells, _) =
-                &self.cells.filter_incident_by_dim(tau_cell_dim, tau_idx)?;
+            let (lower_incident_cells, _) = &self.cells.incidences(tau_cell_dim, tau_idx)?;
 
-            for (sigma_dim, sigma_idx) in lower_incident_cells {
-                if *sigma_dim != k {
-                    continue;
-                }
-
-                if let Some(r) =
-                    self.restrictions
-                        .get(&(*sigma_dim, *sigma_idx, tau_cell_dim, tau_idx))
+            for sigma_idx in *lower_incident_cells {
+                if let Some(r) = self
+                    .restrictions
+                    .get(&(k, *sigma_idx, tau_cell_dim, tau_idx))
                 {
                     let mut term = r
                         .transpose()
@@ -258,7 +245,7 @@ impl<O: OpenSet> CellularSheaf<O> {
 
                     if let Some(incidence_sign) =
                         self.interlinked
-                            .get(&(*sigma_dim, *sigma_idx, tau_cell_dim, tau_idx))
+                            .get(&(k, *sigma_idx, tau_cell_dim, tau_idx))
                     {
                         if *incidence_sign < 0 {
                             term = term.scale(-1.0).map_err(KohoError::Candle)?;
@@ -327,5 +314,99 @@ impl<O: OpenSet> CellularSheaf<O> {
             return Ok(out);
         }
         Matrix::from_vecs(up_b).map_err(KohoError::Candle)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_init_empty_sheaf() {
+        let sh = CellularSheaf::init(DType::F32, Device::Cpu);
+        // Only the 0-skeleton should exist, with no sections or maps
+        assert_eq!(
+            sh.cells.cells.len(),
+            1,
+            "Initial skeleton has only 0-cells layer"
+        );
+        assert!(
+            sh.section_spaces.is_empty(),
+            "No section spaces before any attach"
+        );
+        assert!(sh.restrictions.is_empty(), "No restriction maps initially");
+        assert!(sh.interlinked.is_empty(), "No orientation signs initially");
+        assert!(
+            sh.global_sections.is_empty(),
+            "No global sections initially"
+        );
+    }
+
+    #[test]
+    fn test_attach_sections_and_cells() {
+        let mut sh = CellularSheaf::init(DType::F32, Device::Cpu);
+        // Attach two vertices
+        let sec0 = Section::new(&[1.0f32], 1, Device::Cpu, DType::F32).unwrap();
+        let (k0, idx0) = sh.attach(Cell::new(0), sec0, None, None).unwrap();
+        assert_eq!((k0, idx0), (0, 1));
+        let sec1 = Section::new(&[2.0f32], 1, Device::Cpu, DType::F32).unwrap();
+        let (k0b, idx0b) = sh.attach(Cell::new(0), sec1, None, None).unwrap();
+        assert_eq!((k0b, idx0b), (0, 2));
+        assert_eq!(sh.cells.cells[0].len(), 2, "Two 0-cells attached");
+        assert_eq!(sh.section_spaces[0].len(), 2, "Two sections for 0-cells");
+
+        // Attach an edge between the two vertices
+        let edge_sec = Section::new(&[0.0f32], 1, Device::Cpu, DType::F32).unwrap();
+        let (k1, idx1) = sh
+            .attach(Cell::new(1), edge_sec, None, Some(&[0, 1]))
+            .unwrap();
+        assert_eq!((k1, idx1), (1, 1));
+        assert_eq!(sh.cells.cells[1].len(), 1, "One 1-cell attached");
+        assert_eq!(sh.section_spaces[1].len(), 1, "One section for 1-cell");
+    }
+
+    #[test]
+    fn test_set_restriction_errors_and_success() {
+        let mut sh = CellularSheaf::init(DType::F32, Device::Cpu);
+        // No cells to restrict: should error
+        let map = Matrix::zeros(3, 3, Device::Cpu, DType::F32).unwrap();
+        assert!(matches!(
+            sh.set_restriction(0, 0, 0, map.clone(), 1),
+            Err(KohoError::InvalidCellIdx)
+        ));
+
+        // Attach one vertex and one edge
+        let vsec = Section::new(&[1.0f32], 1, Device::Cpu, DType::F32).unwrap();
+        sh.attach(Cell::new(0), vsec, None, None).unwrap();
+        let esec = Section::new(&[0.0f32], 1, Device::Cpu, DType::F32).unwrap();
+        sh.attach(Cell::new(1), esec, None, Some(&[0])).unwrap();
+
+        // Invalid cell_id: too large
+        let bad_map = Matrix::from_vecs(vec![sh.section_spaces[0][0].0.clone()]).unwrap();
+        assert!(matches!(
+            sh.set_restriction(0, 1, 0, bad_map.clone(), -1),
+            Err(KohoError::InvalidCellIdx)
+        ));
+
+        // Valid restriction
+        let valid_map = Matrix::from_vecs(vec![sh.section_spaces[0][0].0.clone()]).unwrap();
+        assert!(sh.set_restriction(0, 0, 0, valid_map, 1).is_ok());
+    }
+
+    #[test]
+    fn test_get_k_cochain_and_errors() {
+        let mut sh = CellularSheaf::init(DType::F32, Device::Cpu);
+        // No sections yet -> DimensionMismatch
+        assert!(matches!(
+            sh.get_k_cochain(0),
+            Err(KohoError::DimensionMismatch)
+        ));
+
+        // Attach a single 0-cell and retrieve its cochain
+        let sec = Section::new(&[3.0f32], 1, Device::Cpu, DType::F32).unwrap();
+        sh.attach(Cell::new(0), sec, None, None).unwrap();
+        let mat = sh.get_k_cochain(0).unwrap();
+        // Should be a 1x1 matrix containing [3.0]
+        assert_eq!(&[mat.rows(), mat.cols()], &[1, 1]);
     }
 }

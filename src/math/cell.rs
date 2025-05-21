@@ -26,157 +26,73 @@
 //! - 2-cells: disks
 //! - 3-cells: solid balls, etc.
 
-use std::collections::HashSet;
-
 use crate::error::KohoError;
 
-/// `OpenSet` is a collection of `Point` equipped with `union` and `intersection` operations.
-///
-/// In topology, an open set is a fundamental concept that defines the structure of the space.
-/// Open sets satisfy specific closure properties and determine which points are "near" each other.
-pub trait OpenSet: IntoIterator<Item = Self::Point> + Clone + Attach<Self> {
-    type Point;
-    /// builds an `OpenSet` from an `Iterator`
-    fn from(iter: Box<dyn Iterator<Item = Self::Point>>) -> Self;
-    /// Tests if a point is contained in the set.
-    ///
-    /// # Arguments
-    /// * `point` - The point to test for containment
-    fn contains(&self, point: &Self::Point) -> bool;
-
-    /// Computes the set difference (self - other).
-    ///
-    /// # Arguments
-    /// * `other` - The set to subtract from this set
-    fn difference(&self, other: &Self) -> Self;
-
-    /// Computes the intersection of two sets.
-    ///
-    /// # Arguments
-    /// * `other` - The set to intersect with this set
-    fn intersect(&self, other: &Self) -> Self;
-
-    /// Computes the union of two sets.
-    ///
-    /// # Arguments
-    /// * `other` - The set to union with this set
-    fn union(&self, other: &Self) -> Self;
-
-    /// Checks if the set is empty
-    fn is_empty(&self) -> bool;
-}
-
-/// `Topology` is a collection of `OpenSet` intended to enforce closure over union and finite
-/// intersection operations.
-///
-/// A topology defines the structure of a space by specifying which sets are considered "open".
-/// It must satisfy specific axioms: empty set and the whole space are open, arbitrary unions
-/// of open sets are open, and finite intersections of open sets are open.
-pub trait Topology {
-    /// Type for points within `OpenSet`
-    type Point;
-    /// `OpenSet` implementation for this particular `Topology`
-    type OpenSet: OpenSet<Point = Self::Point> + Clone;
-
-    /// Tests if a given set is open in this topological space.
-    ///
-    /// # Arguments
-    /// * `open_set` - The set to test for openness
-    fn is_open(&self, open_set: Self::OpenSet) -> bool;
-    /// Return the collection of all `Point` in the topological space (the underlying set).
-    fn points(&self) -> HashSet<<Self as Topology>::Point>;
-    /// Return the collection of neighborhoods (open sets) already constructed containing the given
-    /// point.
-    ///
-    /// In topology, a neighborhood of a point is an open set containing that point.
-    /// This function returns all such open sets for the given point.
-    fn neighborhoods(
-        &self,
-        point: <Self as Topology>::Point,
-    ) -> HashSet<<Self as Topology>::OpenSet>;
-}
-
-/// Trait for defining the particular attachment map provided an openset and skeleton
-pub trait Attach<O: OpenSet> {
-    /// Attachment map implementation for this particular type of k-cell.
-    ///
-    /// The attachment map defines how a cell is glued to the existing skeleton.
-    /// It maps points from the boundary of the cell to points in the (k-1)-skeleton.
-    fn attach_boundary(&self, skeleton: &Skeleton<O>) -> O;
-}
-
 /// A k-cell of arbitrary type and dimension
-pub struct Cell<O: OpenSet> {
-    /// The openset that the k-cell consists of.
-    pub cell: O,
+pub struct Cell {
     /// `k`, the dimension of the k-cell
     pub dimension: usize,
-    /// Collection of incident cell IDs within the cell complex.
+    /// Collection of upper incident cell IDs within the cell complex.
     ///
     /// Incident cells are those that share boundary components with this cell.
-    /// For example, a 1-cell (edge) is incident to its endpoint 0-cells (vertices),
-    /// and possibly to 2-cells (faces) that have this edge in their boundary.
-    pub incidents: Vec<(usize, usize)>,
-    /// Boundary set of the k-cell
-    pub boundary_set: O,
-    /// The set of corresponding points the boundary is mapped to within
-    /// a particular cell complex the cell attaches to
-    pub boundary_set_correspondence: Option<O>,
+    /// For example, a 1-cell (edge) is incident to its endpoint 0-cells (vertices)
+    pub upper: Vec<usize>,
+    /// Collection of lower incident cell IDs within the cell complex.
+    pub lower: Vec<usize>,
 }
 
-impl<O: OpenSet> Cell<O> {
-    /// Remove the boundary points from the core `cell` field if necessary
-    pub fn remove_boundary(&mut self) {
-        self.cell = self.cell.difference(&self.boundary_set);
-    }
-
+impl Cell {
     /// Generate a new k-cell
-    pub fn new(cell: O, boundary_set: O, dimension: usize) -> Self {
+    pub fn new(dimension: usize) -> Self {
         Self {
-            cell,
             dimension,
-            incidents: Vec::new(),
-            boundary_set,
-            boundary_set_correspondence: None,
+            upper: Vec::new(),
+            lower: Vec::new(),
         }
     }
 
     /// Find all the boundary cells and push incidence indexes to neighbors and itself
-    fn attach(&mut self, skeleton: &mut Skeleton<O>) {
-        let boundary_set_correspondence = self.boundary_set.attach_boundary(skeleton);
+    fn attach(
+        &mut self,
+        skeleton: &mut Skeleton,
+        upper: Option<&[usize]>,
+        lower: Option<&[usize]>,
+    ) {
+        let current = skeleton.cells.len();
+        if current <= self.dimension {
+            skeleton.cells.push(vec![])
+        }
         let max = skeleton.cells[self.dimension].len();
-        for point in boundary_set_correspondence {
-            let mut change: Option<(usize, usize)> = None;
-            skeleton.cells.iter().enumerate().for_each(|(i, x)| {
-                x.iter().enumerate().for_each(|(j, y)| {
-                    if y.cell.contains(&point) {
-                        self.incidents.push((i, j));
-                        change = Some((i, j));
-                    }
-                })
-            });
-            if let Some((i, j)) = change {
-                skeleton.cells[i][j].incidents.push((self.dimension, max));
+        if upper.is_some() {
+            let upper = upper.unwrap();
+            for i in upper {
+                skeleton.cells[self.dimension + 1][*i].lower.push(max);
+                self.upper.push(*i)
+            }
+        }
+        if lower.is_some() {
+            let lower = lower.unwrap();
+            for i in lower {
+                skeleton.cells[self.dimension - 1][*i].upper.push(max);
+                self.lower.push(*i)
             }
         }
     }
 }
-
-type IncidencePair = Vec<(usize, usize)>;
 
 /// A `Skeleton` is a collection of `Cells` that have been glued together along `Cell::attach` maps.
 ///
 /// In CW complex terminology, the n-skeleton consists of all cells of dimension ≤ n.
 /// Building a CW complex involves constructing successive skeletons by attaching cells
 /// of increasing dimension.
-pub struct Skeleton<O: OpenSet> {
+pub struct Skeleton {
     /// Dimension of the `Skeleton` (maximum cell dimension contained)
     pub dimension: usize,
     /// The collection of `Cells` forming the skeleton with [dimension][idx]
-    pub cells: Vec<Vec<Cell<O>>>,
+    pub cells: Vec<Vec<Cell>>,
 }
 
-impl<O: OpenSet> Skeleton<O> {
+impl Skeleton {
     /// Initialize a new `Skeleton`
     pub fn init() -> Self {
         Self {
@@ -193,52 +109,21 @@ impl<O: OpenSet> Skeleton<O> {
     /// 2. Finding boundary points and their images under the attachment map
     /// 3. Updating incidence relationships between cells
     /// 4. Updating the skeleton's dimension if needed
-    pub fn attach(&mut self, mut cell: Cell<O>) -> Result<usize, KohoError> {
+    pub fn attach(
+        &mut self,
+        mut cell: Cell,
+        upper: Option<&[usize]>,
+        lower: Option<&[usize]>,
+    ) -> Result<usize, KohoError> {
         let incoming_dim = cell.dimension as i64;
         if incoming_dim - self.dimension as i64 > 1 {
             return Err(KohoError::DimensionMismatch);
         }
-        cell.attach(self);
+        cell.attach(self, upper, lower);
         if cell.dimension < self.cells.len() {
             self.cells[cell.dimension].push(cell);
         }
         Ok(self.cells[incoming_dim as usize].len())
-    }
-
-    /// Fetches the cell information containing a particular `Point`.
-    ///
-    /// This operation allows for point-based lookup within the cell complex,
-    /// which is useful for navigating the topological structure.
-    pub fn fetch_cell_by_point(
-        &self,
-        point: O::Point,
-    ) -> Result<(&Cell<O>, usize, usize), KohoError> {
-        for i in 0..self.cells.len() {
-            for j in 0..self.cells[i].len() {
-                if self.cells[i][j].cell.contains(&point) {
-                    return Ok((&self.cells[i][j], i, j));
-                };
-            }
-        }
-        Err(KohoError::NoPointFound)
-    }
-
-    /// Returns the collection of all incident cells to the cell at index `cell_idx`.
-    ///
-    /// Incidence relationships capture how cells of different dimensions are connected.
-    /// This is essential for algorithms that need to traverse the cell complex.
-    pub fn incident_cells(
-        &self,
-        cell_idx: usize,
-        cell_dimension: usize,
-    ) -> Result<&Vec<(usize, usize)>, KohoError> {
-        if cell_dimension >= self.cells.len() {
-            return Err(KohoError::DimensionMismatch);
-        }
-        if cell_idx >= self.cells[cell_dimension].len() {
-            return Err(KohoError::InvalidCellIdx);
-        }
-        Ok(&self.cells[cell_dimension][cell_idx].incidents)
     }
 
     /// Returns the collection of incident cells to `cell_idx` with exactly 1 dimension difference.
@@ -246,168 +131,104 @@ impl<O: OpenSet> Skeleton<O> {
     /// This separates boundary relationships (cells of dimension k-1, forming the boundary)
     /// from coboundary relationships (cells of dimension k+1, having this cell in their boundary).
     /// This distinction is important for homology and cohomology calculations.
-    pub fn filter_incident_by_dim(
-        &self,
-        k: usize,
-        cell_idx: usize,
-    ) -> Result<(IncidencePair, IncidencePair), KohoError> {
+    pub fn incidences(&self, k: usize, cell_idx: usize) -> Result<(&[usize], &[usize]), KohoError> {
         if k >= self.cells.len() {
             return Err(KohoError::DimensionMismatch);
         }
         if cell_idx >= self.cells[k].len() {
             return Err(KohoError::InvalidCellIdx);
         }
-        let incidents = &self.cells[k][cell_idx].incidents;
-        let mut lower = (Vec::new(), Vec::new());
-        for (i, j) in incidents {
-            if k as i64 - self.cells[*i][*j].dimension as i64 == 1 {
-                lower.0.push((*i, *j));
-            } else if k as i64 - self.cells[*i][*j].dimension as i64 == -1 {
-                lower.1.push((*i, *j));
-            }
-        }
-        Ok(lower)
+        let upper = &self.cells[k][cell_idx].upper;
+        let lower = &self.cells[k][cell_idx].lower;
+        Ok((upper, lower))
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashSet;
-
-    use super::{Attach, Cell, KohoError, OpenSet, Skeleton};
-
-    /// A trivial point type.
-    #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-    struct TestPoint(&'static str);
-
-    /// A super‐minimal OpenSet impl wrapping a HashSet<TestPoint>.
-    #[derive(Debug, Clone, PartialEq, Eq)]
-    struct TestOpenSet {
-        points: HashSet<TestPoint>,
-    }
-
-    impl TestOpenSet {
-        fn new<I: IntoIterator<Item = TestPoint>>(pts: I) -> Self {
-            Self {
-                points: pts.into_iter().collect(),
-            }
-        }
-    }
-
-    impl IntoIterator for TestOpenSet {
-        type IntoIter = std::collections::hash_set::IntoIter<TestPoint>;
-        type Item = TestPoint;
-
-        fn into_iter(self) -> Self::IntoIter {
-            self.points.into_iter()
-        }
-    }
-
-    impl OpenSet for TestOpenSet {
-        fn from(iter: Box<dyn Iterator<Item = TestPoint>>) -> Self {
-            let pts = iter.collect();
-            Self { points: pts }
-        }
-        type Point = TestPoint;
-
-        fn union(&self, other: &Self) -> Self {
-            let mut pts = self.points.clone();
-            pts.extend(other.points.iter().cloned());
-            Self { points: pts }
-        }
-
-        fn intersect(&self, other: &Self) -> Self {
-            let pts = self.points.intersection(&other.points).cloned().collect();
-            Self { points: pts }
-        }
-
-        fn contains(&self, pt: &Self::Point) -> bool {
-            self.points.contains(pt)
-        }
-
-        fn difference(&self, other: &Self) -> Self {
-            let pts = self.points.difference(&other.points).cloned().collect();
-            Self { points: pts }
-        }
-
-        fn is_empty(&self) -> bool {
-            self.points.is_empty()
-        }
-    }
-
-    // A no-op attach: just returns the same set.
-    impl Attach<TestOpenSet> for TestOpenSet {
-        fn attach_boundary(&self, _skeleton: &Skeleton<TestOpenSet>) -> TestOpenSet {
-            self.clone()
-        }
-    }
+    use super::*;
 
     #[test]
-    fn test_skeleton_init() {
-        let sk: Skeleton<TestOpenSet> = Skeleton::init();
-        // dimension stays 0, and we have exactly one Vec<Cell> slot.
-        assert_eq!(sk.dimension, 0);
-        assert_eq!(sk.cells.len(), 1);
-        assert!(sk.cells[0].is_empty());
-    }
-
-    #[test]
-    fn test_attach_vertex() {
-        let mut sk: Skeleton<TestOpenSet> = Skeleton::init();
-        let pt = TestPoint("A");
-        let cell_oset = TestOpenSet::new(vec![pt.clone()]);
-        let boundary = TestOpenSet::new(vec![]);
-
-        let c = Cell::new(cell_oset.clone(), boundary.clone(), 0);
-        assert!(sk.attach(c).is_ok());
-
-        // We should now have exactly one 0-cell in sk.cells[0].
-        assert_eq!(sk.cells[0].len(), 1);
-        assert!(sk.cells[0][0].cell.contains(&pt));
-    }
-
-    #[test]
-    fn test_remove_boundary() {
-        // A cell whose cell={A,B} and boundary={A} should drop A
-        let mut c = Cell::new(
-            TestOpenSet::new(vec![TestPoint("A"), TestPoint("B")]),
-            TestOpenSet::new(vec![TestPoint("A")]),
-            0,
+    fn test_attach_zero_cells() {
+        let mut sk = Skeleton::init();
+        // Attach a single 0-cell
+        let idx = sk.attach(Cell::new(0), None, None).unwrap();
+        assert_eq!(idx, 1, "Index for first 0-cell should be 1");
+        assert_eq!(
+            sk.cells[0].len(),
+            1,
+            "There should be one 0-cell in the skeleton"
         );
-        c.remove_boundary();
-        let left: HashSet<_> = c.cell.into_iter().collect();
-        assert_eq!(left, vec![TestPoint("B")].into_iter().collect());
     }
 
     #[test]
-    fn test_dimension_mismatch() {
-        let mut sk: Skeleton<TestOpenSet> = Skeleton::init();
-        // attaching a 2-cell onto a 0-skeleton should error
-        let bad = Cell::new(TestOpenSet::new(vec![]), TestOpenSet::new(vec![]), 2);
-        assert!(matches!(sk.attach(bad), Err(KohoError::DimensionMismatch)));
+    fn test_incidences_empty_and_invalid() {
+        let sk = Skeleton::init();
+        // No cells yet: incidences should error on invalid index
+        let err = sk.incidences(0, 0).unwrap_err();
+        assert!(matches!(err, KohoError::InvalidCellIdx));
+
+        // Out-of-range dimension
+        let err = sk.incidences(1, 0).unwrap_err();
+        assert!(matches!(err, KohoError::DimensionMismatch));
     }
 
     #[test]
-    fn test_fetch_cell_by_point() {
-        let mut sk: Skeleton<TestOpenSet> = Skeleton::init();
-        let pt = TestPoint("A");
-        sk.attach(Cell::new(
-            TestOpenSet::new(vec![pt.clone()]),
-            TestOpenSet::new(vec![]),
-            0,
-        ))
-        .unwrap();
+    fn test_dimension_mismatch_on_attach() {
+        let mut sk = Skeleton::init();
+        // Can't attach a 2-cell to an empty 0-skeleton
+        let err = sk.attach(Cell::new(2), None, None).unwrap_err();
+        assert!(matches!(err, KohoError::DimensionMismatch));
+    }
 
-        let found = sk.fetch_cell_by_point(pt.clone());
-        assert!(found.is_ok());
-        let (c_ref, dim, _cell_id) = found.unwrap();
-        assert_eq!(dim, 0);
-        assert!(c_ref.cell.contains(&pt));
+    #[test]
+    fn test_attach_edge_and_incidence_relations() {
+        let mut sk = Skeleton::init();
+        // Create two vertices (0-cells)
+        sk.attach(Cell::new(0), None, None).unwrap(); // v0
+        sk.attach(Cell::new(0), None, None).unwrap(); // v1
+        assert_eq!(sk.cells[0].len(), 2, "There should be two 0-cells");
 
-        // Something I never added should error.
-        assert!(matches!(
-            sk.fetch_cell_by_point(TestPoint("Z")),
-            Err(KohoError::NoPointFound)
-        ));
+        // Attach an edge (1-cell) between v0 and v1
+        let e_idx = sk.attach(Cell::new(1), None, Some(&[0, 1])).unwrap();
+        assert_eq!(e_idx, 1, "Index for first 1-cell should be 1");
+        assert_eq!(sk.cells[1].len(), 1, "There should be one 1-cell");
+
+        // Check that the edge recorded the lower incidences
+        let edge = &sk.cells[1][0];
+        assert_eq!(
+            edge.lower,
+            vec![0, 1],
+            "Edge should be incident to vertices 0 and 1"
+        );
+
+        // Check that each vertex recorded the edge in its upper incidence
+        assert_eq!(
+            sk.cells[0][0].upper,
+            vec![0],
+            "Vertex 0 should have edge 0 in its upper incidences"
+        );
+        assert_eq!(
+            sk.cells[0][1].upper,
+            vec![0],
+            "Vertex 1 should have edge 0 in its upper incidences"
+        );
+
+        // Incidences API for a 0-cell
+        let (upper, _lower) = sk.incidences(0, 0).unwrap();
+        assert_eq!(
+            upper,
+            &[0],
+            "Upper incidences of vertex 0 should contain the edge"
+        );
+    }
+
+    #[test]
+    fn test_invalid_cell_idx_in_incidences() {
+        let mut sk = Skeleton::init();
+        sk.attach(Cell::new(0), None, None).unwrap();
+        // Querying an out-of-bounds cell index should give an error
+        let err = sk.incidences(0, 1).unwrap_err();
+        assert!(matches!(err, KohoError::InvalidCellIdx));
     }
 }

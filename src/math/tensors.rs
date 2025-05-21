@@ -269,6 +269,12 @@ impl Matrix {
         let tensor = Tensor::randn(0.0f32, 1.0f32, (rows, cols), &device)?.to_dtype(dtype)?;
         Self::new(tensor, device, dtype)
     }
+
+    /// Creates a new matrix filled with zeros of the specified dimensions.
+    pub fn zeros(rows: usize, cols: usize, device: Device, dtype: DType) -> Result<Self> {
+        let tensor = Tensor::zeros((rows, cols), dtype, &device)?;
+        Self::new(tensor, device, dtype)
+    }
 }
 
 // Example Usage (requires a candle_core setup)

@@ -10,7 +10,7 @@ use candle_core::Var;
 
 use crate::{
     error::KohoError,
-    math::{cell::OpenSet, sheaf::CellularSheaf, tensors::Matrix},
+    math::{sheaf::CellularSheaf, tensors::Matrix},
     nn::activate::Activations,
     Parameterized,
 };
@@ -20,16 +20,16 @@ use crate::{
 /// This layer applies the Hodge Laplacian of a cellular sheaf, followed by
 /// a learned weight matrix and an activation function. It can be used to build
 /// graph neural networks and other architectures that operate on topological domains.
-pub struct DiffusionLayer<O: OpenSet> {
+pub struct DiffusionLayer {
     /// The underlying cellular sheaf structure
-    sheaf: Rc<CellularSheaf<O>>,
+    sheaf: Rc<CellularSheaf>,
     /// Learnable weights matrix for the diffusion operation
     weights: Var,
     /// Activation function to apply after diffusion
     activation: Activations,
 }
 
-impl<O: OpenSet> DiffusionLayer<O> {
+impl DiffusionLayer {
     /// Creates a new diffusion layer for the given sheaf.
     ///
     /// # Arguments
@@ -42,7 +42,7 @@ impl<O: OpenSet> DiffusionLayer<O> {
     pub fn new(
         k: usize,
         activation: Activations,
-        sheaf: Rc<CellularSheaf<O>>,
+        sheaf: Rc<CellularSheaf>,
     ) -> Result<Self, KohoError> {
         let device = sheaf.device.clone();
         let dtype = sheaf.dtype;
@@ -97,7 +97,7 @@ impl<O: OpenSet> DiffusionLayer<O> {
 /// Implementation of the Parameterized trait for DiffusionLayer.
 ///
 /// This allows the layer to be used with optimizers that expect a list of parameters.
-impl<O: OpenSet> Parameterized for DiffusionLayer<O> {
+impl Parameterized for DiffusionLayer {
     /// Returns the learnable parameters of the layer.
     ///
     /// # Returns
