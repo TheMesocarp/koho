@@ -186,7 +186,6 @@ impl CellularSheaf {
                     output_k_plus_1_cochain[*i] = output_k_plus_1_cochain[*i]
                         .add(&term)
                         .map_err(KohoError::Candle)?;
-                    continue;
                 }
             }
         }
@@ -464,5 +463,4 @@ mod tests {
 
         Ok(())
     }
-
 }
