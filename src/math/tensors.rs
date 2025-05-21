@@ -402,7 +402,7 @@ mod tests {
     fn test_matrix_vector_multiplication() -> Result<()> {
         let device = Device::Cpu;
         let dtype = DType::F32;
-        
+
         // Create a 2x3 matrix
         let matrix = Matrix::from_slice(
             &[1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0],
@@ -411,32 +411,27 @@ mod tests {
             device.clone(),
             dtype,
         )?;
-        
+
         // Create a 3x1 vector
-        let vector = Vector::from_slice(
-            &[7.0f32, 8.0, 9.0],
-            3,
-            device.clone(),
-            dtype,
-        )?;
-        
+        let vector = Vector::from_slice(&[7.0f32, 8.0, 9.0], 3, device.clone(), dtype)?;
+
         // Perform matrix-vector multiplication
         let result = matrix.matvec(&vector)?;
         let squeezed = result.inner().squeeze(1)?;
         // Check dimensions of result
         assert_eq!(result.dimension(), 2);
-        
+
         // Expected result:
         // [1.0, 2.0, 3.0]   [7.0]   [1.0*7.0 + 2.0*8.0 + 3.0*9.0]   [50.0]
         // [4.0, 5.0, 6.0] × [8.0] = [4.0*7.0 + 5.0*8.0 + 6.0*9.0] = [122.0]
         //                   [9.0]
-        
+
         // Convert result to a vector and verify values
         let result_vec = squeezed.to_vec1::<f32>()?;
         assert_eq!(result_vec.len(), 2);
         assert!((result_vec[0] - 50.0).abs() < 1e-6);
         assert!((result_vec[1] - 122.0).abs() < 1e-6);
-        
+
         Ok(())
     }
 
@@ -444,7 +439,7 @@ mod tests {
     fn test_matrix_vector_dimension_mismatch() -> Result<()> {
         let device = Device::Cpu;
         let dtype = DType::F32;
-        
+
         // Create a 2x3 matrix
         let matrix = Matrix::from_slice(
             &[1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0],
@@ -453,19 +448,14 @@ mod tests {
             device.clone(),
             dtype,
         )?;
-        
+
         // Create a vector with incorrect dimension (2 instead of 3)
-        let vector = Vector::from_slice(
-            &[7.0f32, 8.0],
-            2,
-            device.clone(),
-            dtype,
-        )?;
-        
+        let vector = Vector::from_slice(&[7.0f32, 8.0], 2, device.clone(), dtype)?;
+
         // Attempt matrix-vector multiplication should fail
         let result = matrix.matvec(&vector);
         assert!(result.is_err());
-        
+
         Ok(())
     }
 }

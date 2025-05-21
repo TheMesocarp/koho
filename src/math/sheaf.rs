@@ -350,10 +350,10 @@ mod tests {
         // Attach two vertices
         let sec0 = Section::new(&[1.0f32], 1, Device::Cpu, DType::F32).unwrap();
         let (k0, idx0) = sh.attach(Cell::new(0), sec0, None, None).unwrap();
-        assert_eq!((k0, idx0), (0, 1));
+        assert_eq!((k0, idx0), (0, 0));
         let sec1 = Section::new(&[2.0f32], 1, Device::Cpu, DType::F32).unwrap();
         let (k0b, idx0b) = sh.attach(Cell::new(0), sec1, None, None).unwrap();
-        assert_eq!((k0b, idx0b), (0, 2));
+        assert_eq!((k0b, idx0b), (0, 1));
         assert_eq!(sh.cells.cells[0].len(), 2, "Two 0-cells attached");
         assert_eq!(sh.section_spaces[0].len(), 2, "Two sections for 0-cells");
 
@@ -362,7 +362,7 @@ mod tests {
         let (k1, idx1) = sh
             .attach(Cell::new(1), edge_sec, None, Some(&[0, 1]))
             .unwrap();
-        assert_eq!((k1, idx1), (1, 1));
+        assert_eq!((k1, idx1), (1, 0));
         assert_eq!(sh.cells.cells[1].len(), 1, "One 1-cell attached");
         assert_eq!(sh.section_spaces[1].len(), 1, "One section for 1-cell");
     }
@@ -415,28 +415,28 @@ mod tests {
     // Helper function to create a simple sheaf with two vertices and an edge
     fn setup_simple_sheaf() -> Result<CellularSheaf, KohoError> {
         let mut sheaf = CellularSheaf::init(DType::F32, Device::Cpu);
-        
+
         // Attach two 0-cells (vertices)
-        let v0_data = Section::new(&[1.0f32], 1, Device::Cpu, DType::F32).map_err(KohoError::Candle)?;
+        let v0_data =
+            Section::new(&[1.0f32], 1, Device::Cpu, DType::F32).map_err(KohoError::Candle)?;
         let (_, v0_idx) = sheaf.attach(Cell::new(0), v0_data, None, None)?;
-        
-        let v1_data = Section::new(&[2.0f32], 1, Device::Cpu, DType::F32).map_err(KohoError::Candle)?;
+
+        let v1_data =
+            Section::new(&[2.0f32], 1, Device::Cpu, DType::F32).map_err(KohoError::Candle)?;
         let (_, v1_idx) = sheaf.attach(Cell::new(0), v1_data, None, None)?;
 
         // Attach 1-cell (edge) connecting vertices
-        let e_data = Section::new(&[0.0f32], 1, Device::Cpu, DType::F32).map_err(KohoError::Candle)?;
-        let (_, e_idx) = sheaf.attach(
-            Cell::new(1), 
-            e_data, 
-            None, 
-            Some(&[v0_idx, v1_idx])
-        )?;
+        let e_data =
+            Section::new(&[0.0f32], 1, Device::Cpu, DType::F32).map_err(KohoError::Candle)?;
+        let (_, e_idx) = sheaf.attach(Cell::new(1), e_data, None, Some(&[v0_idx, v1_idx]))?;
 
         // Set restriction maps (vertex -> edge maps)
-        let r_v0 = Matrix::from_slice(&[1.0f32], 1, 1, Device::Cpu, DType::F32).map_err(KohoError::Candle)?;
+        let r_v0 = Matrix::from_slice(&[1.0f32], 1, 1, Device::Cpu, DType::F32)
+            .map_err(KohoError::Candle)?;
         sheaf.set_restriction(0, v0_idx, e_idx, r_v0, 1)?;
 
-        let r_v1 = Matrix::from_slice(&[-1.0f32], 1, 1, Device::Cpu, DType::F32).map_err(KohoError::Candle)?;
+        let r_v1 = Matrix::from_slice(&[-1.0f32], 1, 1, Device::Cpu, DType::F32)
+            .map_err(KohoError::Candle)?;
         sheaf.set_restriction(0, v1_idx, e_idx, r_v1, 1)?;
 
         Ok(sheaf)
@@ -445,9 +445,12 @@ mod tests {
     #[test]
     fn test_coboundary_computation() -> Result<(), KohoError> {
         let sheaf = setup_simple_sheaf()?;
-        
+
         // Get 0-cochain (vertex data)
-        let k_cochain = sheaf.get_k_cochain(0)?.to_vectors().map_err(KohoError::Candle)?;
+        let k_cochain = sheaf
+            .get_k_cochain(0)?
+            .to_vectors()
+            .map_err(KohoError::Candle)?;
         assert_eq!(k_cochain.len(), 2, "Should have two 0-cells");
 
         // Compute coboundary (should produce edge data)
@@ -455,14 +458,17 @@ mod tests {
         assert_eq!(result.len(), 1, "Should have one 1-cell");
 
         // Verify edge value: 1*1.0 (from v0) + (-1)*2.0 (from v1) = -1.0
-        let edge_value = result[0].inner().squeeze(1).map_err(KohoError::Candle)?.to_vec1::<f32>().map_err(KohoError::Candle)?[0];
+        let edge_value = result[0]
+            .inner()
+            .squeeze(1)
+            .map_err(KohoError::Candle)?
+            .to_vec1::<f32>()
+            .map_err(KohoError::Candle)?[0];
         assert!(
             (edge_value - (-1.0f32)).abs() < 1e-6,
-            "Edge value mismatch, got: {}",
-            edge_value
+            "Edge value mismatch, got: {edge_value}"
         );
 
         Ok(())
     }
-
 }

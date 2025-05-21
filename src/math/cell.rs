@@ -63,15 +63,13 @@ impl Cell {
             skeleton.cells.push(vec![])
         }
         let max = skeleton.cells[self.dimension].len();
-        if upper.is_some() {
-            let upper = upper.unwrap();
+        if let Some(upper) = upper {
             for i in upper {
                 skeleton.cells[self.dimension + 1][*i].lower.push(max);
                 self.upper.push(*i)
             }
         }
-        if lower.is_some() {
-            let lower = lower.unwrap();
+        if let Some(lower) = lower {
             for i in lower {
                 skeleton.cells[self.dimension - 1][*i].upper.push(max);
                 self.lower.push(*i)
@@ -123,7 +121,7 @@ impl Skeleton {
         if cell.dimension < self.cells.len() {
             self.cells[cell.dimension].push(cell);
         }
-        Ok(self.cells[incoming_dim as usize].len()-1)
+        Ok(self.cells[incoming_dim as usize].len() - 1)
     }
 
     /// Returns the collection of incident cells to `cell_idx` with exactly 1 dimension difference.
@@ -131,7 +129,11 @@ impl Skeleton {
     /// This separates boundary relationships (cells of dimension k-1, forming the boundary)
     /// from coboundary relationships (cells of dimension k+1, having this cell in their boundary).
     /// This distinction is important for homology and cohomology calculations.
-    pub fn incidences(&self, k: usize, cell_idx: usize) -> Result<(&Vec<usize>, &Vec<usize>), KohoError> {
+    pub fn incidences(
+        &self,
+        k: usize,
+        cell_idx: usize,
+    ) -> Result<(&Vec<usize>, &Vec<usize>), KohoError> {
         if k >= self.cells.len() {
             return Err(KohoError::DimensionMismatch);
         }
@@ -191,7 +193,7 @@ mod tests {
 
         // Attach an edge (1-cell) between v0 and v1
         let e_idx = sk.attach(Cell::new(1), None, Some(&[0, 1])).unwrap();
-        assert_eq!(e_idx, 1, "Index for first 1-cell should be 1");
+        assert_eq!(e_idx, 0, "Index for first 1-cell should be 0");
         assert_eq!(sk.cells[1].len(), 1, "There should be one 1-cell");
 
         // Check that the edge recorded the lower incidences
