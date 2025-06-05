@@ -85,6 +85,7 @@ impl SheafNN {
         optimizer_kind: OptimKind,
         lr: f64,
         optimizer_params: OptimizerParams,
+        print: bool
     ) -> Result<TrainingMetrics, KohoError> {
         // Create the optimizer
         let mut optimizer =
@@ -121,9 +122,9 @@ impl SheafNN {
             let avg_loss = total_loss / (data.len() as f32);
             metrics.push(EpochMetrics::new(epoch, avg_loss));
 
-            // Optional: print progress
-            if epoch % 10 == 0 || epoch == 1 {
-                println!("Epoch {}/{}: loss = {:.6}", epoch, epochs, avg_loss);
+            // for debugging
+            if epoch % 10 == 0 || epoch == 1 && print {
+                println!("Epoch {epoch}/{epochs}: loss = {avg_loss:.6}");
             }
         }
         Ok(metrics)
