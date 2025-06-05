@@ -121,6 +121,9 @@ impl Skeleton {
         if cell.dimension < self.cells.len() {
             self.cells[cell.dimension].push(cell);
         }
+        if incoming_dim > self.dimension as i64 {
+            self.dimension = incoming_dim as usize
+        }
         Ok(self.cells[incoming_dim as usize].len() - 1)
     }
 

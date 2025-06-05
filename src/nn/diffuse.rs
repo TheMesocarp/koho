@@ -4,8 +4,6 @@
 //! allowing for learned signal processing on topological domains. The diffusion is based on the
 //! Hodge Laplacian operator and can be used in graph neural networks and other topological learning models.
 
-use std::rc::Rc;
-
 use candle_core::Var;
 
 use crate::{
@@ -21,8 +19,6 @@ use crate::{
 /// a learned weight matrix and an activation function. It can be used to build
 /// graph neural networks and other architectures that operate on topological domains.
 pub struct DiffusionLayer {
-    /// The underlying cellular sheaf structure
-    sheaf: Rc<CellularSheaf>,
     /// Learnable weights matrix for the diffusion operation
     weights: Var,
     /// Activation function to apply after diffusion
@@ -35,14 +31,14 @@ impl DiffusionLayer {
     /// # Arguments
     /// * `k` - The dimension to perform diffusion on
     /// * `activation` - The activation function to apply after diffusion
-    /// * `sheaf` - Reference-counted pointer to the cellular sheaf
+    /// * `sheaf` - Reference to the core cellular sheaf
     ///
     /// # Returns
     /// A new DiffusionLayer instance with randomly initialized weights
     pub fn new(
         k: usize,
         activation: Activations,
-        sheaf: Rc<CellularSheaf>,
+        sheaf: &CellularSheaf,
     ) -> Result<Self, KohoError> {
         let device = sheaf.device.clone();
         let dtype = sheaf.dtype;
@@ -50,7 +46,6 @@ impl DiffusionLayer {
         let weights = Matrix::rand(dim, dim, device, dtype).map_err(KohoError::Candle)?;
         let weights = Var::from_tensor(weights.inner()).map_err(KohoError::Candle)?;
         Ok(Self {
-            sheaf,
             weights,
             activation,
         })
@@ -65,16 +60,18 @@ impl DiffusionLayer {
     /// * `k` - The dimension to perform diffusion on
     /// * `k_features` - The input feature matrix for cells of dimension k
     /// * `down_included` - Whether to include diffusion from lower-dimensional cells
+    /// * `sheaf` - Reference to the core cellular sheaf
     ///
     /// # Returns
     /// The matrix of diffused features after applying weights and activation
     pub fn diffuse(
         &self,
+        sheaf: &CellularSheaf,
         k: usize,
         k_features: Matrix,
         down_included: bool,
     ) -> Result<Matrix, KohoError> {
-        let diff = self.sheaf.k_hodge_laplacian(k, k_features, down_included)?;
+        let diff = sheaf.k_hodge_laplacian(k, k_features, down_included)?;
         let weighted = self
             .weights
             .as_tensor()

@@ -6,7 +6,7 @@
 //! signal processing on topological domains, and other applications where the topology
 //! of data is important.
 
-use candle_core::{DType, Device, Result as CandleResult, WithDType};
+use candle_core::{DType, Device, Result as CandleResult, Var, WithDType};
 use std::collections::HashMap;
 
 use crate::{
@@ -58,6 +58,8 @@ pub struct CellularSheaf {
     pub device: Device,
     /// Data type for tensor elements
     pub dtype: DType,
+    /// Indicates of the sheaf learns restrictions, or if they are provided
+    pub learned: bool,
 }
 
 impl CellularSheaf {
@@ -66,7 +68,7 @@ impl CellularSheaf {
     /// # Arguments
     /// * `dtype` - The data type to use for tensor elements
     /// * `device` - The device to use for tensor operations
-    pub fn init(dtype: DType, device: Device) -> Self {
+    pub fn init(dtype: DType, device: Device, learned: bool) -> Self {
         Self {
             cells: Skeleton::init(),
             section_spaces: Vec::new(),
@@ -75,6 +77,7 @@ impl CellularSheaf {
             global_sections: Vec::new(),
             device,
             dtype,
+            learned,
         }
     }
 
@@ -136,6 +139,39 @@ impl CellularSheaf {
             .insert((k, cell_id, k + 1, higher_cell), map);
         self.interlinked
             .insert((k, cell_id, k + 1, higher_cell), interlink);
+        Ok(())
+    }
+
+    pub fn generate_initial_restrictions(&mut self, noise_limit: f64) -> Result<(), KohoError> {
+        let dim = self.cells.dimension;
+        for i in 0..dim - 1 {
+            let sections = &self.section_spaces[i];
+            let upper_sections = &self.section_spaces[i + 1];
+            if sections.is_empty() {
+                return Err(KohoError::NoSections { i });
+            }
+            if upper_sections.is_empty() {
+                return Err(KohoError::NoSections { i: i + 1 });
+            }
+            let stalk_dim = sections[0].0.dimension();
+            let stalk_dim_upper = upper_sections[0].0.dimension();
+
+            let id = Matrix::identity(stalk_dim_upper, stalk_dim, self.device.clone(), self.dtype)
+                .map_err(KohoError::Candle)?;
+
+            for (j, _) in sections.iter().enumerate() {
+                let (_, uppers) = self.cells.incidences(i, j)?;
+                for k in uppers {
+                    let noise =
+                        Matrix::rand(stalk_dim_upper, stalk_dim, self.device.clone(), self.dtype)
+                            .map_err(KohoError::Candle)?
+                            .scale(noise_limit)
+                            .map_err(KohoError::Candle)?;
+                    let fix = id.clone().add(&noise).map_err(KohoError::Candle)?;
+                    self.restrictions.insert((i, j, i + 1, *k), fix);
+                }
+            }
+        }
         Ok(())
     }
 
@@ -320,6 +356,32 @@ impl CellularSheaf {
         }
         Matrix::from_vecs(up_b).map_err(KohoError::Candle)
     }
+
+    pub fn parameters(&self, k: usize, down_included: bool) -> Vec<Var> {
+        self.restrictions
+            .iter()
+            .filter_map(|(key, x)| {
+                if key.0 == k || (down_included && k - key.0 == 1) {
+                    Some(x.inner().clone())
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>()
+    }
+
+    pub fn parameters_mut(&mut self, k: usize, down_included: bool) -> Vec<&mut Var> {
+        self.restrictions
+            .iter_mut()
+            .filter_map(|(key, x)| {
+                if key.0 == k || (down_included && k - key.0 == 1) {
+                    Some(x.inner_mut())
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>()
+    }
 }
 
 #[cfg(test)]
@@ -328,7 +390,7 @@ mod tests {
 
     #[test]
     fn test_init_empty_sheaf() {
-        let sh = CellularSheaf::init(DType::F32, Device::Cpu);
+        let sh = CellularSheaf::init(DType::F32, Device::Cpu, false);
         // Only the 0-skeleton should exist, with no sections or maps
         assert_eq!(
             sh.cells.cells.len(),
@@ -349,7 +411,7 @@ mod tests {
 
     #[test]
     fn test_attach_sections_and_cells() {
-        let mut sh = CellularSheaf::init(DType::F32, Device::Cpu);
+        let mut sh = CellularSheaf::init(DType::F32, Device::Cpu, false);
         // Attach two vertices
         let sec0 = Section::new(&[1.0f32], 1, Device::Cpu, DType::F32).unwrap();
         let (k0, idx0) = sh.attach(Cell::new(0), sec0, None, None).unwrap();
@@ -372,7 +434,7 @@ mod tests {
 
     #[test]
     fn test_set_restriction_errors_and_success() {
-        let mut sh = CellularSheaf::init(DType::F32, Device::Cpu);
+        let mut sh = CellularSheaf::init(DType::F32, Device::Cpu, false);
         // No cells to restrict: should error
         let map = Matrix::zeros(3, 3, Device::Cpu, DType::F32).unwrap();
         assert!(matches!(
@@ -400,7 +462,7 @@ mod tests {
 
     #[test]
     fn test_get_k_cochain_and_errors() {
-        let mut sh = CellularSheaf::init(DType::F32, Device::Cpu);
+        let mut sh = CellularSheaf::init(DType::F32, Device::Cpu, false);
         // No sections yet -> DimensionMismatch
         assert!(matches!(
             sh.get_k_cochain(0),
@@ -417,7 +479,7 @@ mod tests {
 
     // Helper function to create a simple sheaf with two vertices and an edge
     fn setup_simple_sheaf() -> Result<CellularSheaf, KohoError> {
-        let mut sheaf = CellularSheaf::init(DType::F32, Device::Cpu);
+        let mut sheaf = CellularSheaf::init(DType::F32, Device::Cpu, false);
 
         // Attach two 0-cells (vertices)
         let v0_data =
