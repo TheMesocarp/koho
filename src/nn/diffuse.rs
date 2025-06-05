@@ -105,4 +105,8 @@ impl Parameterized for DiffusionLayer {
     fn parameters(&self) -> Vec<Var> {
         vec![self.weights.clone()]
     }
+
+    fn parameters_mut(&mut self) -> Vec<&mut Var> {
+        vec![&mut self.weights]
+    }
 }

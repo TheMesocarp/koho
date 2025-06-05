@@ -96,13 +96,17 @@ impl CellularSheaf {
         let k = cell.dimension;
         let idx = self.cells.attach(cell, upper, lower)?;
         let current_dim = self.section_spaces.len();
-        if current_dim < k {
-            return Err(KohoError::DimensionMismatch);
-        } else if current_dim == k {
-            self.section_spaces.push(vec![data]);
-            return Ok((k, idx));
+        match current_dim.cmp(&k) {
+            std::cmp::Ordering::Less => {
+                return Err(KohoError::DimensionMismatch);
+            }
+            std::cmp::Ordering::Equal => {
+                self.section_spaces.push(vec![data]);
+            }
+            std::cmp::Ordering::Greater => {
+                self.section_spaces[k].push(data);
+            }
         }
-        self.section_spaces[k].push(data);
         Ok((k, idx))
     }
 
