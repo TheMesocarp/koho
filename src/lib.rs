@@ -27,7 +27,7 @@ pub mod nn;
 pub trait Parameterized {
     /// Returns a Vec of every Var (learnable parameter) this module owns.
     fn parameters(&self) -> Vec<Var>;
-    
+
     /// Returns mutable references to parameters (new method)
     fn parameters_mut(&mut self) -> Vec<&mut Var>;
 }
@@ -59,11 +59,7 @@ impl SheafNN {
     /// A new SheafNN with default optimizer
     pub fn sequential(k: usize, layers: Vec<DiffusionLayer>, loss: LossKind) -> Self {
         let loss_fn = LossFn::new(loss);
-        Self {
-            layers,
-            loss_fn,
-            k,
-        }
+        Self { layers, loss_fn, k }
     }
 
     /// Refreshes the parameters tracked by the optimizer.
@@ -89,39 +85,42 @@ impl SheafNN {
         optimizer_kind: OptimKind,
         lr: f64,
         optimizer_params: OptimizerParams,
-    ) -> Result<TrainingMetrics, KohoError> { 
+    ) -> Result<TrainingMetrics, KohoError> {
         // Create the optimizer
-        let mut optimizer = create_optimizer(optimizer_kind, self.parameters_mut(), lr, optimizer_params)
-            .map_err(KohoError::Candle)?;
-        
+        let mut optimizer =
+            create_optimizer(optimizer_kind, self.parameters_mut(), lr, optimizer_params)
+                .map_err(KohoError::Candle)?;
+
         let mut metrics = TrainingMetrics::new(epochs);
-        
+
         for epoch in 1..=epochs {
             let mut total_loss = 0.0_f32;
-            
+
             for (input, target) in data {
                 // Forward pass
                 let output = self.forward(input.clone(), down_included)?;
-                
+
                 // Compute loss
                 let loss_tensor = self
                     .loss_fn
                     .compute(output.inner(), target.inner())
                     .map_err(KohoError::Candle)?;
-                
+
                 let loss_val = loss_tensor.to_scalar::<f32>().unwrap_or(f32::NAN);
                 total_loss += loss_val;
-                
+
                 // Backward pass
                 let grads = loss_tensor.backward().map_err(KohoError::Candle)?;
-                
+
                 // Optimizer step (in-place update of parameters)
-                optimizer.step(&grads, self.parameters_mut()).map_err(KohoError::Candle)?;
+                optimizer
+                    .step(&grads, self.parameters_mut())
+                    .map_err(KohoError::Candle)?;
             }
-            
+
             let avg_loss = total_loss / (data.len() as f32);
             metrics.push(EpochMetrics::new(epoch, avg_loss));
-            
+
             // Optional: print progress
             if epoch % 10 == 0 || epoch == 1 {
                 println!("Epoch {}/{}: loss = {:.6}", epoch, epochs, avg_loss);
@@ -142,7 +141,7 @@ impl Parameterized for SheafNN {
             .flat_map(|layer| layer.parameters())
             .collect()
     }
-    
+
     fn parameters_mut(&mut self) -> Vec<&mut Var> {
         self.layers
             .iter_mut()

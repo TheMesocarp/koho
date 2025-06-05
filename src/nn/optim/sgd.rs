@@ -22,13 +22,13 @@ impl SGD {
             momentum_buffers: HashMap::new(),
         })
     }
-    
+
     /// Enable momentum with the given coefficient
     pub fn momentum(mut self, momentum: f64) -> Self {
         self.momentum = Some(momentum);
         self
     }
-    
+
     /// Enable weight decay (L2 regularization)
     pub fn weight_decay(mut self, weight_decay: f64) -> Self {
         self.weight_decay = Some(weight_decay);
@@ -40,7 +40,7 @@ impl Optimizer for SGD {
     fn step(&mut self, grads: &GradStore, vars: Vec<&mut Var>) -> CandleResult<()> {
         for var in vars {
             let ptr = var as *const Var;
-            
+
             if let Some(grad) = grads.get(var) {
                 let mut effective_grad = grad.clone();
 
@@ -54,7 +54,7 @@ impl Optimizer for SGD {
                     } else {
                         Ok(effective_grad.clone())
                     }?;
-                    
+
                     self.momentum_buffers.insert(ptr, buf.clone());
                     effective_grad = buf;
                 }
@@ -64,11 +64,11 @@ impl Optimizer for SGD {
         }
         Ok(())
     }
-    
+
     fn learning_rate(&self) -> f64 {
         self.lr
     }
-    
+
     fn set_learning_rate(&mut self, lr: f64) {
         self.lr = lr;
     }

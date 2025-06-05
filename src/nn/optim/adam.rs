@@ -4,15 +4,15 @@ use crate::nn::optim::Optimizer;
 
 /// Adam optimizer with optional weight decay (AdamW)
 pub struct Adam {
-    m: Vec<Tensor>,  // First moment (mean)
-    v: Vec<Tensor>,  // Second moment (variance)
-    t: f64,  // Time step
+    m: Vec<Tensor>, // First moment (mean)
+    v: Vec<Tensor>, // Second moment (variance)
+    t: f64,         // Time step
     lr: f64,
     beta1: f64,
     beta2: f64,
     eps: f64,
     weight_decay: Option<f64>,
-    decoupled: bool,  // If true, use AdamW
+    decoupled: bool, // If true, use AdamW
 }
 
 impl Adam {
@@ -20,17 +20,17 @@ impl Adam {
     pub fn new(vars: Vec<&mut Var>, lr: f64) -> CandleResult<Self> {
         let mut m = Vec::new();
         let mut v = Vec::new();
-        
+
         // Initialize moment buffers with zeros
         for var in &vars {
             let shape = var.shape();
             let device = var.device();
             let dtype = var.dtype();
-            
+
             m.push(Tensor::zeros(shape, dtype, device)?);
             v.push(Tensor::zeros(shape, dtype, device)?);
         }
-        
+
         Ok(Self {
             m,
             v,
@@ -43,27 +43,27 @@ impl Adam {
             decoupled: false,
         })
     }
-    
+
     /// Set beta coefficients
     pub fn betas(mut self, beta1: f64, beta2: f64) -> Self {
         self.beta1 = beta1;
         self.beta2 = beta2;
         self
     }
-    
+
     /// Set epsilon for numerical stability
     pub fn eps(mut self, eps: f64) -> Self {
         self.eps = eps;
         self
     }
-    
+
     /// Enable weight decay (coupled - standard Adam with L2)
     pub fn weight_decay(mut self, weight_decay: f64) -> Self {
         self.weight_decay = Some(weight_decay);
         self.decoupled = false;
         self
     }
-    
+
     /// Enable decoupled weight decay (AdamW)
     pub fn decoupled_weight_decay(mut self, weight_decay: f64) -> Self {
         self.weight_decay = Some(weight_decay);
@@ -79,7 +79,9 @@ impl Optimizer for Adam {
         let bias_correction1 = 1.0 - self.beta1.powf(self.t);
         let bias_correction2 = 1.0 - self.beta2.powf(self.t);
         if self.v.len() != vars.len() {
-            return Err(candle_core::Error::Msg("params do not match initialization".to_string()))
+            return Err(candle_core::Error::Msg(
+                "params do not match initialization".to_string(),
+            ));
         }
         for (i, var) in vars.into_iter().enumerate() {
             if let Some(grad) = grads.get(var) {
@@ -97,7 +99,7 @@ impl Optimizer for Adam {
                 let v_new = ((v_t * self.beta2)? + (effective_grad.sqr()? * (1.0 - self.beta2))?)?;
                 let m_hat = (&m_new / bias_correction1)?;
                 let v_hat = (&v_new / bias_correction2)?;
-                
+
                 let update = (m_hat * self.lr)? / (v_hat.sqrt()? + self.eps)?;
                 if let Some(wd) = self.weight_decay {
                     if self.decoupled {
@@ -118,11 +120,11 @@ impl Optimizer for Adam {
         }
         Ok(())
     }
-    
+
     fn learning_rate(&self) -> f64 {
         self.lr
     }
-    
+
     fn set_learning_rate(&mut self, lr: f64) {
         self.lr = lr;
     }
