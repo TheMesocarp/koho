@@ -3,7 +3,6 @@
 //! This module provides a neural network architecture that operates on cellular sheaves,
 //! allowing for topological deep learning on structured data. The SheafNN implements
 //! a sequence of diffusion layers and provides training utilities.
-
 use candle_core::Var;
 use error::KohoError;
 use math::tensors::Matrix;
@@ -14,7 +13,7 @@ use nn::{
     optim::{OptimKind, OptimizerParams},
 };
 
-use crate::nn::optim::create_optimizer;
+use crate::{math::sheaf::CellularSheaf, nn::optim::create_optimizer};
 
 pub mod error;
 pub mod math;
@@ -39,27 +38,49 @@ pub trait Parameterized {
 /// topological structure. It includes complete training functionality with
 /// configurable optimizers and loss functions.
 pub struct SheafNN {
+    sheaf: CellularSheaf,
     /// The sequence of diffusion layers in the network
     layers: Vec<DiffusionLayer>,
     /// The loss function used for training
     loss_fn: LossFn,
     /// The dimension of cells this network operates on
     k: usize,
+    down_included: bool,
 }
 
 impl SheafNN {
-    /// Creates a new sheaf neural network with the specified diffusion layers and loss type.
+    /// Initializes a new `SheafNN` for the provided `CellularSheaf`
     ///
     /// # Arguments
-    /// * `k` - The dimension of cells this network will operate on
-    /// * `layers` - A vector of diffusion layers that form the network
-    /// * `loss` - The type of loss function to use for training
+    /// * `k` - The cell dimension at which the neural network sits
+    /// * `down_laplacian_included` - Indicates whether to use the full Hodge Laplacian or just the up-Laplacian
+    /// * `loss` - The loss type of the network
+    /// * `sheaf` - The `CellularSheaf` in which to diffuse over
     ///
     /// # Returns
-    /// A new SheafNN with default optimizer
-    pub fn sequential(k: usize, layers: Vec<DiffusionLayer>, loss: LossKind) -> Self {
+    /// A new `SheafNN` without diffusion layers initialized
+    pub fn init(
+        k: usize,
+        down_laplacian_included: bool,
+        loss: LossKind,
+        sheaf: CellularSheaf,
+    ) -> Self {
         let loss_fn = LossFn::new(loss);
-        Self { layers, loss_fn, k }
+        Self {
+            sheaf,
+            layers: Vec::new(),
+            loss_fn,
+            k,
+            down_included: down_laplacian_included,
+        }
+    }
+
+    /// Initializes the diffusion layers for a fresh sheaf neural network with the specified diffusion layers.
+    ///
+    /// # Arguments
+    /// * `layers` - A vector of diffusion layers that form the network
+    pub fn sequential(&mut self, layers: Vec<DiffusionLayer>) {
+        self.layers = layers;
     }
 
     /// Refreshes the parameters tracked by the optimizer.
@@ -72,11 +93,12 @@ impl SheafNN {
     pub fn forward(&self, input: Matrix, down_included: bool) -> Result<Matrix, KohoError> {
         let mut output = input;
         for i in &self.layers {
-            output = i.diffuse(self.k, output, down_included)?;
+            output = i.diffuse(&self.sheaf, self.k, output, down_included)?;
         }
         Ok(output)
     }
 
+    /// Main training loop
     pub fn train(
         &mut self,
         data: &[(Matrix, Matrix)],
@@ -131,16 +153,27 @@ impl Parameterized for SheafNN {
     /// # Returns
     /// A vector containing all the network's parameters
     fn parameters(&self) -> Vec<Var> {
-        self.layers
+        let mut out = self
+            .layers
             .iter()
             .flat_map(|layer| layer.parameters())
-            .collect()
+            .collect::<Vec<_>>();
+        if self.sheaf.learned {
+            out.extend(self.sheaf.parameters(self.k, self.down_included));
+        }
+        out
     }
 
     fn parameters_mut(&mut self) -> Vec<&mut Var> {
-        self.layers
+        let learned = self.sheaf.learned;
+        let mut out = self
+            .layers
             .iter_mut()
             .flat_map(|layer| layer.parameters_mut())
-            .collect()
+            .collect::<Vec<_>>();
+        if learned {
+            out.extend(self.sheaf.parameters_mut(self.k, self.down_included));
+        }
+        out
     }
 }

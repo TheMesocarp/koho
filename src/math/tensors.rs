@@ -1,4 +1,4 @@
-use candle_core::{DType, Device, Error, Result, Tensor, WithDType};
+use candle_core::{DType, Device, Error, Result, Tensor, Var, WithDType};
 
 #[derive(Debug, Clone)]
 pub struct Vector {
@@ -78,7 +78,7 @@ impl Vector {
 
 #[derive(Debug, Clone)]
 pub struct Matrix {
-    pub tensor: Tensor,
+    pub tensor: Var,
     pub device: Device,
     pub dtype: DType,
 }
@@ -90,7 +90,7 @@ impl Matrix {
             return Err(Error::Msg("Matrix must be rank 2".into()));
         }
         Ok(Self {
-            tensor,
+            tensor: Var::from_tensor(&tensor)?,
             device,
             dtype,
         })
@@ -163,9 +163,14 @@ impl Matrix {
         self.tensor.dims()[1]
     }
 
-    /// Returns a reference to the inner `Tensor`.
-    pub fn inner(&self) -> &Tensor {
+    /// Returns a reference to the inner `Var`.
+    pub fn inner(&self) -> &Var {
         &self.tensor
+    }
+
+    /// Returns a reference to the inner `Var`.
+    pub fn inner_mut(&mut self) -> &mut Var {
+        &mut self.tensor
     }
 
     /// Performs matrix multiplication: `self * other`.
@@ -177,7 +182,7 @@ impl Matrix {
                 other.rows()
             )));
         }
-        let result_tensor = self.tensor.matmul(other.inner())?;
+        let result_tensor = Var::from_tensor(&self.tensor.matmul(other.inner())?)?;
         Ok(Self {
             tensor: result_tensor,
             device: self.device.clone(),
@@ -203,7 +208,7 @@ impl Matrix {
 
     /// Transposes the matrix.
     pub fn transpose(&self) -> Result<Self> {
-        let result_tensor = self.tensor.transpose(0, 1)?;
+        let result_tensor = Var::from_tensor(&self.tensor.transpose(0, 1)?)?;
         Ok(Self {
             tensor: result_tensor,
             device: self.device.clone(),
@@ -220,7 +225,7 @@ impl Matrix {
                 other.shape()
             )));
         }
-        let result_tensor = self.tensor.add(other.inner())?;
+        let result_tensor = Var::from_tensor(&self.tensor.add(other.inner())?)?;
         Ok(Self {
             tensor: result_tensor,
             device: self.device.clone(),
@@ -232,7 +237,7 @@ impl Matrix {
     pub fn scale<T: WithDType>(&self, scalar: T) -> Result<Self> {
         let tensor = self.tensor.clone().to_dtype(DType::F64)?;
         Ok(Self {
-            tensor: (tensor * scalar.to_scalar().to_f64())?,
+            tensor: Var::from_tensor(&(tensor * scalar.to_scalar().to_f64())?)?,
             device: self.device.clone(),
             dtype: self.dtype,
         })
@@ -267,6 +272,26 @@ impl Matrix {
     pub fn zeros(rows: usize, cols: usize, device: Device, dtype: DType) -> Result<Self> {
         let tensor = Tensor::zeros((rows, cols), dtype, &device)?;
         Self::new(tensor, device, dtype)
+    }
+
+    pub fn identity(rows: usize, cols: usize, device: Device, dtype: DType) -> Result<Self> {
+        // Start with a zero matrix
+        let mut tensor = Tensor::zeros((rows, cols), dtype, &device)?;
+
+        // Set diagonal elements to 1
+        let min_dim = rows.min(cols);
+        for i in 0..min_dim {
+            // Create a tensor with value 1.0
+            let one = Tensor::ones((1, 1), dtype, &device)?;
+            // Use narrow and copy to set the diagonal element
+            tensor = tensor.slice_assign(&[i..i + 1, i..i + 1], &one)?;
+        }
+
+        Self::new(tensor, device, dtype)
+    }
+
+    pub fn identity_like(&self, rows: usize, cols: usize) -> Result<Self> {
+        Self::identity(rows, cols, self.device.clone(), self.dtype)
     }
 }
 
@@ -365,7 +390,7 @@ mod tests {
     impl Matrix {
         // A more conventional scale method for numeric scalars
         pub fn scale_numeric(&self, scalar_val: f64) -> Result<Self> {
-            let result_tensor = (self.tensor.clone() * scalar_val)?;
+            let result_tensor = Var::from_tensor(&(self.tensor.clone().as_tensor() * scalar_val)?)?;
             Ok(Self {
                 tensor: result_tensor,
                 device: self.device.clone(),
@@ -455,6 +480,104 @@ mod tests {
         // Attempt matrix-vector multiplication should fail
         let result = matrix.matvec(&vector);
         assert!(result.is_err());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_identity_square() -> Result<()> {
+        let device = Device::Cpu;
+        let dtype = DType::F32;
+
+        // Test 3x3 identity matrix
+        let i3 = Matrix::identity(3, 3, device, dtype)?;
+        let values = i3.inner().to_vec2::<f32>()?;
+
+        assert_eq!(
+            values,
+            vec![
+                vec![1.0, 0.0, 0.0],
+                vec![0.0, 1.0, 0.0],
+                vec![0.0, 0.0, 1.0],
+            ]
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_identity_rectangular_tall() -> Result<()> {
+        let device = Device::Cpu;
+        let dtype = DType::F32;
+
+        // Test 4x2 identity-like matrix (tall)
+        let i42 = Matrix::identity(4, 2, device, dtype)?;
+        let values = i42.inner().to_vec2::<f32>()?;
+
+        assert_eq!(
+            values,
+            vec![
+                vec![1.0, 0.0],
+                vec![0.0, 1.0],
+                vec![0.0, 0.0],
+                vec![0.0, 0.0],
+            ]
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_identity_rectangular_wide() -> Result<()> {
+        let device = Device::Cpu;
+        let dtype = DType::F32;
+
+        // Test 2x4 identity-like matrix (wide)
+        let i24 = Matrix::identity(2, 4, device, dtype)?;
+        let values = i24.inner().to_vec2::<f32>()?;
+
+        assert_eq!(
+            values,
+            vec![vec![1.0, 0.0, 0.0, 0.0], vec![0.0, 1.0, 0.0, 0.0],]
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_identity_like_method() -> Result<()> {
+        let device = Device::Cpu;
+        let dtype = DType::F64;
+
+        // Create a matrix to use as reference for device/dtype
+        let ref_matrix = Matrix::zeros(5, 5, device, dtype)?;
+
+        // Use identity_like to create a 3x3 identity with same settings
+        let i3 = ref_matrix.identity_like(3, 3)?;
+
+        assert_eq!(i3.dtype, dtype);
+        assert_eq!(i3.shape(), (3, 3));
+
+        // Verify it's actually an identity matrix
+        let values = i3.inner().to_vec2::<f64>()?;
+        assert_eq!(values[0][0], 1.0);
+        assert_eq!(values[1][1], 1.0);
+        assert_eq!(values[2][2], 1.0);
+        assert_eq!(values[0][1], 0.0);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_identity_single_element() -> Result<()> {
+        let device = Device::Cpu;
+        let dtype = DType::F32;
+
+        // Test 1x1 identity matrix
+        let i1 = Matrix::identity(1, 1, device, dtype)?;
+        let values = i1.inner().to_vec2::<f32>()?;
+
+        assert_eq!(values, vec![vec![1.0]]);
 
         Ok(())
     }
