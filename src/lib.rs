@@ -85,7 +85,7 @@ impl SheafNN {
         optimizer_kind: OptimKind,
         lr: f64,
         optimizer_params: OptimizerParams,
-        print: bool
+        print: bool,
     ) -> Result<TrainingMetrics, KohoError> {
         // Create the optimizer
         let mut optimizer =
