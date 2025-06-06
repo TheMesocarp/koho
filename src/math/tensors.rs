@@ -236,9 +236,13 @@ impl Matrix {
     /// Scales the matrix by a scalar.
     pub fn scale<T: WithDType>(&self, scalar: T) -> Result<Self> {
         // Keep everything in the same dtype
-        let scalar_tensor = Tensor::full(scalar.to_scalar().to_f64(), self.tensor.dims(), &self.device)?
-            .to_dtype(self.dtype)?;
-        
+        let scalar_tensor = Tensor::full(
+            scalar.to_scalar().to_f64(),
+            self.tensor.dims(),
+            &self.device,
+        )?
+        .to_dtype(self.dtype)?;
+
         Ok(Self {
             tensor: Var::from_tensor(&self.tensor.mul(&scalar_tensor)?)?,
             device: self.device.clone(),
@@ -305,12 +309,13 @@ impl Matrix {
                 other.dimension()
             )));
         }
-        
-        let result_tensor = other.inner()
+
+        let result_tensor = other
+            .inner()
             .transpose(0, 1)?
             .matmul(&self.tensor)?
             .transpose(0, 1)?;
-        
+
         Ok(Vector {
             tensor: result_tensor,
             device: self.device.clone(),
