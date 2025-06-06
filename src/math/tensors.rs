@@ -235,9 +235,12 @@ impl Matrix {
 
     /// Scales the matrix by a scalar.
     pub fn scale<T: WithDType>(&self, scalar: T) -> Result<Self> {
-        let tensor = self.tensor.clone().to_dtype(DType::F64)?;
+        // Keep everything in the same dtype
+        let scalar_tensor = Tensor::full(scalar.to_scalar().to_f64(), self.tensor.dims(), &self.device)?
+            .to_dtype(self.dtype)?;
+        
         Ok(Self {
-            tensor: Var::from_tensor(&(tensor * scalar.to_scalar().to_f64())?)?,
+            tensor: Var::from_tensor(&self.tensor.mul(&scalar_tensor)?)?,
             device: self.device.clone(),
             dtype: self.dtype,
         })
@@ -292,6 +295,27 @@ impl Matrix {
 
     pub fn identity_like(&self, rows: usize, cols: usize) -> Result<Self> {
         Self::identity(rows, cols, self.device.clone(), self.dtype)
+    }
+
+    pub fn transpose_matvec(&self, other: &Vector) -> Result<Vector> {
+        if self.rows() != other.dimension() {
+            return Err(Error::Msg(format!(
+                "Transposed matrix multiplication dimension mismatch: self_rows ({}) != other_dim ({})",
+                self.rows(),
+                other.dimension()
+            )));
+        }
+        
+        let result_tensor = other.inner()
+            .transpose(0, 1)?
+            .matmul(&self.tensor)?
+            .transpose(0, 1)?;
+        
+        Ok(Vector {
+            tensor: result_tensor,
+            device: self.device.clone(),
+            dtype: self.dtype,
+        })
     }
 }
 
