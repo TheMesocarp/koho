@@ -278,11 +278,7 @@ impl CellularSheaf {
                     .restrictions
                     .get(&(k, *sigma_idx, tau_cell_dim, tau_idx))
                 {
-                    let mut term = r
-                        .transpose()
-                        .map_err(KohoError::Candle)?
-                        .matvec(y_tau)
-                        .map_err(KohoError::Candle)?;
+                    let mut term = r.transpose_matvec(y_tau).map_err(KohoError::Candle)?;
 
                     if let Some(incidence_sign) =
                         self.interlinked
