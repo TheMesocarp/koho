@@ -81,7 +81,7 @@ impl Vector {
 pub struct VarMatrix {
     pub var: Var,
     pub device: Device,
-    pub dtype: DType
+    pub dtype: DType,
 }
 
 impl VarMatrix {
@@ -111,7 +111,9 @@ impl VarMatrix {
 
     pub fn from_vecs(vecs: Vec<Vector>) -> Result<Self> {
         if vecs.is_empty() {
-            return Err(Error::Msg("Cannot create matrix from empty vector list".into()));
+            return Err(Error::Msg(
+                "Cannot create matrix from empty vector list".into(),
+            ));
         }
 
         let first_vec = &vecs[0];
@@ -125,7 +127,9 @@ impl VarMatrix {
             if vec.dimension() != dimension {
                 return Err(Error::Msg(format!(
                     "Vector {} has dimension {} but expected {}",
-                    i, vec.dimension(), dimension
+                    i,
+                    vec.dimension(),
+                    dimension
                 )));
             }
             // Reshape to column vector and preserve gradients
@@ -218,12 +222,8 @@ impl VarMatrix {
     /// Scales the matrix by a scalar.
     pub fn scale<T: WithDType>(&self, scalar: T) -> Result<Matrix> {
         // Keep everything in the same dtype
-        let scalar_tensor = Tensor::full(
-            scalar,
-            self.var.dims(),
-            &self.device,
-        )?
-        .to_dtype(self.dtype)?;
+        let scalar_tensor =
+            Tensor::full(scalar, self.var.dims(), &self.device)?.to_dtype(self.dtype)?;
 
         Ok(Matrix {
             tensor: self.var.mul(&scalar_tensor)?,
@@ -306,7 +306,6 @@ impl VarMatrix {
     }
 }
 
-
 #[derive(Debug, Clone)]
 pub struct Matrix {
     pub tensor: Tensor,
@@ -341,7 +340,9 @@ impl Matrix {
 
     pub fn from_vecs(vecs: Vec<Vector>) -> Result<Self> {
         if vecs.is_empty() {
-            return Err(Error::Msg("Cannot create matrix from empty vector list".into()));
+            return Err(Error::Msg(
+                "Cannot create matrix from empty vector list".into(),
+            ));
         }
 
         let first_vec = &vecs[0];
@@ -355,7 +356,9 @@ impl Matrix {
             if vec.dimension() != dimension {
                 return Err(Error::Msg(format!(
                     "Vector {} has dimension {} but expected {}",
-                    i, vec.dimension(), dimension
+                    i,
+                    vec.dimension(),
+                    dimension
                 )));
             }
             // Reshape to column vector and preserve gradients
@@ -448,12 +451,8 @@ impl Matrix {
     /// Scales the matrix by a scalar.
     pub fn scale<T: WithDType>(&self, scalar: T) -> Result<Self> {
         // Keep everything in the same dtype
-        let scalar_tensor = Tensor::full(
-            scalar,
-            self.tensor.dims(),
-            &self.device,
-        )?
-        .to_dtype(self.dtype)?;
+        let scalar_tensor =
+            Tensor::full(scalar, self.tensor.dims(), &self.device)?.to_dtype(self.dtype)?;
 
         Ok(Self {
             tensor: self.tensor.mul(&scalar_tensor)?,
@@ -537,9 +536,8 @@ impl Matrix {
     }
 }
 
-// Example Usage (requires a candle_core setup)
 #[cfg(test)]
-mod tests {
+mod matrix_tests {
     use super::*;
     use candle_core::Device;
 

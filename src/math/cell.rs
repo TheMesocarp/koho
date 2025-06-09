@@ -62,9 +62,9 @@ impl Cell {
         while skeleton.cells.len() <= self.dimension {
             skeleton.cells.push(Vec::new());
         }
-        
+
         let max = skeleton.cells[self.dimension].len();
-        
+
         if let Some(upper) = upper {
             for i in upper {
                 // Ensure the upper dimension exists
@@ -75,7 +75,7 @@ impl Cell {
                 self.upper.push(*i);
             }
         }
-        
+
         if let Some(lower) = lower {
             for i in lower {
                 skeleton.cells[self.dimension - 1][*i].upper.push(max);
