@@ -58,21 +58,28 @@ impl Cell {
         upper: Option<&[usize]>,
         lower: Option<&[usize]>,
     ) {
-        let current = skeleton.cells.len();
-        if current <= self.dimension {
-            skeleton.cells.push(vec![])
+        // Ensure skeleton has enough dimension layers
+        while skeleton.cells.len() <= self.dimension {
+            skeleton.cells.push(Vec::new());
         }
+        
         let max = skeleton.cells[self.dimension].len();
+        
         if let Some(upper) = upper {
             for i in upper {
+                // Ensure the upper dimension exists
+                while skeleton.cells.len() <= self.dimension + 1 {
+                    skeleton.cells.push(Vec::new());
+                }
                 skeleton.cells[self.dimension + 1][*i].lower.push(max);
-                self.upper.push(*i)
+                self.upper.push(*i);
             }
         }
+        
         if let Some(lower) = lower {
             for i in lower {
                 skeleton.cells[self.dimension - 1][*i].upper.push(max);
-                self.lower.push(*i)
+                self.lower.push(*i);
             }
         }
     }

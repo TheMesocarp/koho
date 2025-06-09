@@ -52,8 +52,9 @@ impl Vector {
     }
 
     pub fn add(&self, other: &Vector) -> Result<Self> {
+        let result_tensor = (self.tensor.clone() + other.tensor.clone())?;
         Ok(Self {
-            tensor: self.tensor.add(&other.tensor)?,
+            tensor: result_tensor,
             device: self.device.clone(),
             dtype: self.dtype,
         })
@@ -77,20 +78,20 @@ impl Vector {
 }
 
 #[derive(Debug, Clone)]
-pub struct Matrix {
-    pub tensor: Var,
+pub struct VarMatrix {
+    pub var: Var,
     pub device: Device,
-    pub dtype: DType,
+    pub dtype: DType
 }
 
-impl Matrix {
+impl VarMatrix {
     /// Creates a new `Matrix`.
     pub fn new(tensor: Tensor, device: Device, dtype: DType) -> Result<Self> {
         if tensor.rank() != 2 {
             return Err(Error::Msg("Matrix must be rank 2".into()));
         }
         Ok(Self {
-            tensor: Var::from_tensor(&tensor)?,
+            var: Var::from_tensor(&tensor)?,
             device,
             dtype,
         })
@@ -110,9 +111,7 @@ impl Matrix {
 
     pub fn from_vecs(vecs: Vec<Vector>) -> Result<Self> {
         if vecs.is_empty() {
-            return Err(Error::Msg(
-                "Cannot create a matrix from an empty list of vectors.".into(),
-            ));
+            return Err(Error::Msg("Cannot create matrix from empty vector list".into()));
         }
 
         let first_vec = &vecs[0];
@@ -120,30 +119,251 @@ impl Matrix {
         let device = first_vec.device.clone();
         let dtype = first_vec.dtype;
 
+        // Collect all vector tensors
         let mut column_tensors = Vec::with_capacity(vecs.len());
-
         for (i, vec) in vecs.iter().enumerate() {
             if vec.dimension() != dimension {
                 return Err(Error::Msg(format!(
-                    "Vector at index {} has dimension {} but expected {}.",
-                    i,
-                    vec.dimension(),
-                    dimension
+                    "Vector {} has dimension {} but expected {}",
+                    i, vec.dimension(), dimension
                 )));
             }
-            if vec.dtype != dtype {
-                return Err(Error::Msg(format!(
-                    "Vector at index {} has a different dtype. Expected {:?}, got {:?}.",
-                    i, dtype, vec.dtype
-                )));
-            }
-
+            // Reshape to column vector and preserve gradients
             column_tensors.push(vec.inner().reshape((dimension, 1))?);
         }
 
-        // Concatenate all column tensors along dimension 1 (columns)
+        // Concatenate preserving gradients
         let matrix_tensor = Tensor::cat(&column_tensors, 1)?;
+        Self::new(matrix_tensor, device, dtype)
+    }
 
+    /// Returns the shape of the matrix as `(rows, cols)`.
+    pub fn shape(&self) -> (usize, usize) {
+        let dims = self.var.dims();
+        (dims[0], dims[1])
+    }
+
+    /// Returns the number of rows in the matrix.
+    pub fn rows(&self) -> usize {
+        self.var.dims()[0]
+    }
+
+    /// Returns the number of columns in the matrix.
+    pub fn cols(&self) -> usize {
+        self.var.dims()[1]
+    }
+
+    /// Returns a reference to the inner `Var`.
+    pub fn inner(&self) -> &Var {
+        &self.var
+    }
+
+    /// Returns a reference to the inner `Var`.
+    pub fn inner_mut(&mut self) -> &mut Var {
+        &mut self.var
+    }
+
+    /// Performs matrix multiplication: `self * other`.
+    pub fn matmul(&self, other: &Matrix) -> Result<Matrix> {
+        if self.cols() != other.rows() {
+            return Err(Error::Msg(format!(
+                "Matrix multiplication dimension mismatch: self_cols ({}) != other_rows ({})",
+                self.cols(),
+                other.rows()
+            )));
+        }
+        let result_tensor = self.var.matmul(other.inner())?;
+        Ok(Matrix {
+            tensor: result_tensor,
+            device: self.device.clone(),
+            dtype: self.dtype,
+        })
+    }
+
+    pub fn matvec(&self, other: &Vector) -> Result<Vector> {
+        if self.cols() != other.dimension() {
+            return Err(Error::Msg(format!(
+                "Matrix multiplication dimension mismatch: self_cols ({}) != other_rows ({})",
+                self.cols(),
+                other.dimension()
+            )));
+        }
+        let result_tensor = self.var.matmul(other.inner())?;
+        Vector::new(result_tensor, self.device.clone(), self.dtype)
+    }
+
+    /// Transposes the matrix.
+    pub fn transpose(&self) -> Result<Matrix> {
+        let result_tensor = self.var.transpose(0, 1)?;
+        Ok(Matrix {
+            tensor: result_tensor,
+            device: self.device.clone(),
+            dtype: self.dtype,
+        })
+    }
+
+    /// Adds another matrix to this matrix element-wise.
+    pub fn add(&self, other: &Matrix) -> Result<Matrix> {
+        if self.shape() != other.shape() {
+            return Err(Error::Msg(format!(
+                "Matrix addition shape mismatch: self {:?} != other {:?}",
+                self.shape(),
+                other.shape()
+            )));
+        }
+        let result_tensor = (self.var.as_tensor() + other.tensor.clone())?;
+        Matrix::new(result_tensor, self.device.clone(), self.dtype)
+    }
+
+    /// Scales the matrix by a scalar.
+    pub fn scale<T: WithDType>(&self, scalar: T) -> Result<Matrix> {
+        // Keep everything in the same dtype
+        let scalar_tensor = Tensor::full(
+            scalar,
+            self.var.dims(),
+            &self.device,
+        )?
+        .to_dtype(self.dtype)?;
+
+        Ok(Matrix {
+            tensor: self.var.mul(&scalar_tensor)?,
+            device: self.device.clone(),
+            dtype: self.dtype,
+        })
+    }
+
+    /// Computes the Frobenius norm of the matrix.
+    /// The Frobenius norm is sqrt(sum of squares of its elements).
+    pub fn frobenius_norm(&self) -> Result<Tensor> {
+        self.var.sqr()?.sum_all()?.sqrt()
+    }
+
+    pub fn to_vectors(&self) -> Result<Vec<Vector>> {
+        let (_, cols) = self.shape();
+        let mut cols_vectors = Vec::with_capacity(cols);
+
+        let cols_tensors = self.var.chunk(cols, 1)?;
+
+        for col_tensor in cols_tensors {
+            cols_vectors.push(Vector::new(col_tensor, self.device.clone(), self.dtype)?);
+        }
+
+        Ok(cols_vectors)
+    }
+
+    /// Generates a new random matrix with elements sampled from a standard normal distribution (mean 0, std dev 1).
+    pub fn rand(rows: usize, cols: usize, device: Device, dtype: DType) -> Result<Self> {
+        let tensor = Tensor::randn(0.0f32, 1.0f32, (rows, cols), &device)?.to_dtype(dtype)?;
+        Self::new(tensor, device, dtype)
+    }
+
+    /// Creates a new matrix filled with zeros of the specified dimensions.
+    pub fn zeros(rows: usize, cols: usize, device: Device, dtype: DType) -> Result<Self> {
+        let tensor = Tensor::zeros((rows, cols), dtype, &device)?;
+        Self::new(tensor, device, dtype)
+    }
+
+    pub fn identity(rows: usize, cols: usize, device: Device, dtype: DType) -> Result<Self> {
+        // Start with a zero matrix
+        let mut tensor = Tensor::zeros((rows, cols), dtype, &device)?;
+
+        // Set diagonal elements to 1
+        let min_dim = rows.min(cols);
+        for i in 0..min_dim {
+            // Create a tensor with value 1.0
+            let one = Tensor::ones((1, 1), dtype, &device)?;
+            // Use narrow and copy to set the diagonal element
+            tensor = tensor.slice_assign(&[i..i + 1, i..i + 1], &one)?;
+        }
+
+        Self::new(tensor, device, dtype)
+    }
+
+    pub fn identity_like(&self, rows: usize, cols: usize) -> Result<Self> {
+        Self::identity(rows, cols, self.device.clone(), self.dtype)
+    }
+
+    pub fn transpose_matvec(&self, other: &Vector) -> Result<Vector> {
+        if self.rows() != other.dimension() {
+            return Err(Error::Msg(format!(
+                "Transposed matrix multiplication dimension mismatch: self_rows ({}) != other_dim ({})",
+                self.rows(),
+                other.dimension()
+            )));
+        }
+
+        let result_tensor = other
+            .inner()
+            .transpose(0, 1)?
+            .matmul(&self.var)?
+            .transpose(0, 1)?;
+
+        Ok(Vector {
+            tensor: result_tensor,
+            device: self.device.clone(),
+            dtype: self.dtype,
+        })
+    }
+}
+
+
+#[derive(Debug, Clone)]
+pub struct Matrix {
+    pub tensor: Tensor,
+    pub device: Device,
+    pub dtype: DType,
+}
+
+impl Matrix {
+    /// Creates a new `Matrix`.
+    pub fn new(tensor: Tensor, device: Device, dtype: DType) -> Result<Self> {
+        if tensor.rank() != 2 {
+            return Err(Error::Msg("Matrix must be rank 2".into()));
+        }
+        Ok(Self {
+            tensor,
+            device,
+            dtype,
+        })
+    }
+
+    /// Creates a new `Matrix` from a slice of data.
+    pub fn from_slice<T: WithDType>(
+        data: &[T],
+        rows: usize,
+        cols: usize,
+        device: Device,
+        dtype: DType,
+    ) -> Result<Self> {
+        let t = Tensor::from_slice(data, (rows, cols), &device)?;
+        Self::new(t, device, dtype)
+    }
+
+    pub fn from_vecs(vecs: Vec<Vector>) -> Result<Self> {
+        if vecs.is_empty() {
+            return Err(Error::Msg("Cannot create matrix from empty vector list".into()));
+        }
+
+        let first_vec = &vecs[0];
+        let dimension = first_vec.dimension();
+        let device = first_vec.device.clone();
+        let dtype = first_vec.dtype;
+
+        // Collect all vector tensors
+        let mut column_tensors = Vec::with_capacity(vecs.len());
+        for (i, vec) in vecs.iter().enumerate() {
+            if vec.dimension() != dimension {
+                return Err(Error::Msg(format!(
+                    "Vector {} has dimension {} but expected {}",
+                    i, vec.dimension(), dimension
+                )));
+            }
+            // Reshape to column vector and preserve gradients
+            column_tensors.push(vec.inner().reshape((dimension, 1))?);
+        }
+
+        // Concatenate preserving gradients
+        let matrix_tensor = Tensor::cat(&column_tensors, 1)?;
         Self::new(matrix_tensor, device, dtype)
     }
 
@@ -164,12 +384,12 @@ impl Matrix {
     }
 
     /// Returns a reference to the inner `Var`.
-    pub fn inner(&self) -> &Var {
+    pub fn inner(&self) -> &Tensor {
         &self.tensor
     }
 
     /// Returns a reference to the inner `Var`.
-    pub fn inner_mut(&mut self) -> &mut Var {
+    pub fn inner_mut(&mut self) -> &mut Tensor {
         &mut self.tensor
     }
 
@@ -182,7 +402,7 @@ impl Matrix {
                 other.rows()
             )));
         }
-        let result_tensor = Var::from_tensor(&self.tensor.matmul(other.inner())?)?;
+        let result_tensor = self.tensor.matmul(other.inner())?;
         Ok(Self {
             tensor: result_tensor,
             device: self.device.clone(),
@@ -199,16 +419,12 @@ impl Matrix {
             )));
         }
         let result_tensor = self.tensor.matmul(other.inner())?;
-        Ok(Vector {
-            tensor: result_tensor,
-            device: self.device.clone(),
-            dtype: self.dtype,
-        })
+        Vector::new(result_tensor, self.device.clone(), self.dtype)
     }
 
     /// Transposes the matrix.
     pub fn transpose(&self) -> Result<Self> {
-        let result_tensor = Var::from_tensor(&self.tensor.transpose(0, 1)?)?;
+        let result_tensor = self.tensor.transpose(0, 1)?;
         Ok(Self {
             tensor: result_tensor,
             device: self.device.clone(),
@@ -225,26 +441,22 @@ impl Matrix {
                 other.shape()
             )));
         }
-        let result_tensor = Var::from_tensor(&self.tensor.add(other.inner())?)?;
-        Ok(Self {
-            tensor: result_tensor,
-            device: self.device.clone(),
-            dtype: self.dtype,
-        })
+        let result_tensor = (self.tensor.clone() + other.tensor.clone())?;
+        Self::new(result_tensor, self.device.clone(), self.dtype)
     }
 
     /// Scales the matrix by a scalar.
     pub fn scale<T: WithDType>(&self, scalar: T) -> Result<Self> {
         // Keep everything in the same dtype
         let scalar_tensor = Tensor::full(
-            scalar.to_scalar().to_f64(),
+            scalar,
             self.tensor.dims(),
             &self.device,
         )?
         .to_dtype(self.dtype)?;
 
         Ok(Self {
-            tensor: Var::from_tensor(&self.tensor.mul(&scalar_tensor)?)?,
+            tensor: self.tensor.mul(&scalar_tensor)?,
             device: self.device.clone(),
             dtype: self.dtype,
         })
@@ -271,7 +483,8 @@ impl Matrix {
 
     /// Generates a new random matrix with elements sampled from a standard normal distribution (mean 0, std dev 1).
     pub fn rand(rows: usize, cols: usize, device: Device, dtype: DType) -> Result<Self> {
-        let tensor = Tensor::randn(0.0f32, 1.0f32, (rows, cols), &device)?.to_dtype(dtype)?;
+        let scale = (2.0 / (rows + cols) as f64).sqrt();
+        let tensor = Tensor::randn(0.0f32, scale as f32, (rows, cols), &device)?.to_dtype(dtype)?;
         Self::new(tensor, device, dtype)
     }
 
@@ -419,7 +632,7 @@ mod tests {
     impl Matrix {
         // A more conventional scale method for numeric scalars
         pub fn scale_numeric(&self, scalar_val: f64) -> Result<Self> {
-            let result_tensor = Var::from_tensor(&(self.tensor.clone().as_tensor() * scalar_val)?)?;
+            let result_tensor = (self.tensor.clone() * scalar_val)?;
             Ok(Self {
                 tensor: result_tensor,
                 device: self.device.clone(),

@@ -145,6 +145,126 @@ impl SheafNN {
         }
         Ok(metrics)
     }
+
+    pub fn train_debug(
+        &mut self,
+        data: &[(Matrix, Matrix)],
+        epochs: usize,
+        down_included: bool,
+        optimizer_kind: OptimKind,
+        lr: f64,
+        optimizer_params: OptimizerParams,
+    ) -> Result<TrainingMetrics, KohoError> {
+        println!("=== Training Debug Info ===");
+        
+        // Check if we have any parameters to optimize
+        let params = self.parameters();
+        println!("Total parameters: {}", params.len());
+        for (i, param) in params.iter().enumerate() {
+            let param_data = param.as_tensor().flatten_all().map_err(KohoError::Candle)?;
+            let param_vec = param_data.to_vec1::<f32>().map_err(KohoError::Candle)?;
+            println!("Parameter {}: shape={:?}, first_few_values={:?}", 
+                i, param.shape(), &param_vec[..param_vec.len().min(5)]);
+        }
+        
+        // Create the optimizer
+        let mut optimizer =
+            create_optimizer(optimizer_kind, self.parameters_mut(), lr, optimizer_params)
+                .map_err(KohoError::Candle)?;
+
+        let mut metrics = TrainingMetrics::new(epochs);
+
+        for epoch in 1..=epochs {
+            let mut total_loss = 0.0_f32;
+
+            for (batch_idx, (input, target)) in data.iter().enumerate() {
+                println!("\nEpoch {}, Batch {}", epoch, batch_idx);
+                
+                // Print input/target info
+                let input_data = input.inner().flatten_all().map_err(KohoError::Candle)?;
+                let target_data = target.inner().flatten_all().map_err(KohoError::Candle)?;
+                let input_vec = input_data.to_vec1::<f32>().map_err(KohoError::Candle)?;
+                let target_vec = target_data.to_vec1::<f32>().map_err(KohoError::Candle)?;
+                
+                println!("Input: {:?}", input_vec);
+                println!("Target: {:?}", target_vec);
+
+                // Forward pass
+                let output = self.forward(input.clone(), down_included)?;
+                let output_data = output.inner().flatten_all().map_err(KohoError::Candle)?;
+                let output_vec = output_data.to_vec1::<f32>().map_err(KohoError::Candle)?;
+                println!("Output: {:?}", output_vec);
+
+                // Compute loss
+                let loss_tensor = self
+                    .loss_fn
+                    .compute(output.inner(), target.inner())
+                    .map_err(KohoError::Candle)?;
+
+                let loss_val = loss_tensor.to_scalar::<f32>().unwrap_or(f32::NAN);
+                total_loss += loss_val;
+                println!("Loss: {}", loss_val);
+
+                // Check if loss tensor requires grad
+                println!("Loss tensor shape: {:?}", loss_tensor.shape());
+                println!("Loss tensor dtype: {:?}", loss_tensor.dtype());
+
+                // Backward pass
+                println!("Computing gradients...");
+                let grads = loss_tensor.backward().map_err(KohoError::Candle)?;
+                
+                // Check gradients
+                let params_mut = self.parameters_mut();
+                println!("Checking gradients for {} parameters:", params_mut.len());
+                for (i, param) in params_mut.iter().enumerate() {
+                    if let Some(grad) = grads.get(param) {
+                        let grad_data = grad.flatten_all().map_err(KohoError::Candle)?;
+                        let grad_vec = grad_data.to_vec1::<f32>().map_err(KohoError::Candle)?;
+                        let grad_norm = grad_vec.iter().map(|x| x * x).sum::<f32>().sqrt();
+                        println!("  Param {}: grad_norm={}, first_few_grads={:?}", 
+                            i, grad_norm, &grad_vec[..grad_vec.len().min(3)]);
+                    } else {
+                        println!("  Param {}: NO GRADIENT FOUND", i);
+                    }
+                }
+
+                // Optimizer step (in-place update of parameters)
+                println!("Applying optimizer step...");
+                let params_before: Vec<_> = self.parameters_mut().iter()
+                    .map(|p| p.as_tensor().flatten_all().unwrap().to_vec1::<f32>().unwrap())
+                    .collect();
+                
+                optimizer
+                    .step(&grads, self.parameters_mut())
+                    .map_err(KohoError::Candle)?;
+                
+                let params_after: Vec<_> = self.parameters_mut().iter()
+                    .map(|p| p.as_tensor().flatten_all().unwrap().to_vec1::<f32>().unwrap())
+                    .collect();
+                
+                // Check if parameters actually changed
+                for (i, (before, after)) in params_before.iter().zip(params_after.iter()).enumerate() {
+                    let diff_norm: f32 = before.iter().zip(after.iter())
+                        .map(|(b, a)| (b - a).powi(2))
+                        .sum::<f32>()
+                        .sqrt();
+                    println!("  Param {} change norm: {}", i, diff_norm);
+                }
+                
+                if epoch <= 3 { // Only print detailed info for first few epochs
+                    println!("--- End batch {} ---", batch_idx);
+                }
+            }
+
+            let avg_loss = total_loss / (data.len() as f32);
+            metrics.push(EpochMetrics::new(epoch, avg_loss));
+            
+            if epoch <= 10 || epoch % 10 == 0 {
+                println!("Epoch {}: avg_loss = {}", epoch, avg_loss);
+            }
+        }
+        Ok(metrics)
+    }
 }
 
 impl Parameterized for SheafNN {
@@ -175,5 +295,244 @@ impl Parameterized for SheafNN {
             out.extend(self.sheaf.parameters_mut(self.k, self.down_included));
         }
         out
+    }
+}
+
+
+#[cfg(test)]
+mod integration_tests {
+    use super::*;
+    use crate::{
+        math::{
+            cell::Cell,
+            sheaf::{CellularSheaf, Section},
+            tensors::Matrix,
+        },
+        nn::{
+            diffuse::DiffusionLayer,
+            activate::Activations,
+            loss::LossKind,
+            optim::{OptimKind, OptimizerParams},
+        },
+    };
+    use candle_core::{DType, Device};
+
+    /// Creates a triangle (2-cell) with 3 vertices and 3 edges
+    /// This is a simple but non-trivial topological structure for testing
+    fn create_triangle_sheaf() -> Result<CellularSheaf, KohoError> {
+        let mut sheaf = CellularSheaf::init(DType::F32, Device::Cpu, true);
+        
+        // Create 3 vertices (0-cells) with initial data
+        let v0_data = Section::new(&[1.0f32], 1, Device::Cpu, DType::F32)
+            .map_err(KohoError::Candle)?;
+        let (_, v0_idx) = sheaf.attach(Cell::new(0), v0_data, None, None)?;
+        
+        let v1_data = Section::new(&[0.0f32], 1, Device::Cpu, DType::F32)
+            .map_err(KohoError::Candle)?;
+        let (_, v1_idx) = sheaf.attach(Cell::new(0), v1_data, None, None)?;
+        
+        let v2_data = Section::new(&[0.0f32], 1, Device::Cpu, DType::F32)
+            .map_err(KohoError::Candle)?;
+        let (_, v2_idx) = sheaf.attach(Cell::new(0), v2_data, None, None)?;
+        
+        // Create 3 edges (1-cells)
+        let e0_data = Section::new(&[0.5f32], 1, Device::Cpu, DType::F32)
+            .map_err(KohoError::Candle)?;
+        let (_, e0_idx) = sheaf.attach(Cell::new(1), e0_data, None, Some(&[v0_idx, v1_idx]))?;
+        
+        let e1_data = Section::new(&[0.5f32], 1, Device::Cpu, DType::F32)
+            .map_err(KohoError::Candle)?;
+        let (_, e1_idx) = sheaf.attach(Cell::new(1), e1_data, None, Some(&[v1_idx, v2_idx]))?;
+        
+        let e2_data = Section::new(&[0.5f32], 1, Device::Cpu, DType::F32)
+            .map_err(KohoError::Candle)?;
+        let (_, e2_idx) = sheaf.attach(Cell::new(1), e2_data, None, Some(&[v2_idx, v0_idx]))?;
+        
+        // Create 1 triangle face (2-cell)
+        let f0_data = Section::new(&[0.0f32], 1, Device::Cpu, DType::F32)
+            .map_err(KohoError::Candle)?;
+        let (_, _f0_idx) = sheaf.attach(Cell::new(2), f0_data, None, Some(&[e0_idx, e1_idx, e2_idx]))?;
+        
+        // Generate random restriction maps with small noise for learning
+        sheaf.generate_initial_restrictions(0.1)?;
+        println!("uppers: {:?}", sheaf.cells.cells[0][0].upper);
+        Ok(sheaf)
+    }
+
+    #[test]
+    fn test_triangle_diffusion_learning() -> Result<(), KohoError> {
+        let sheaf = create_triangle_sheaf()?;
+        
+        // Create a simple dataset: we want the signal to diffuse from vertex 0 to others
+        // Input: signal at vertex 0, zeros elsewhere
+        // Target: some diffused pattern (e.g., decreasing values)
+        let input = sheaf.get_k_cochain(0)?;  // Current state: [1.0, 0.0, 0.0]
+        
+        // Target: we want diffusion to spread the signal
+        let target_data = vec![0.8f32, 0.6f32, 0.4f32];  // Manually designed target
+        let target = Matrix::from_slice(
+            &target_data, 
+            1, 3, 
+            Device::Cpu, 
+            DType::F32
+        ).map_err(KohoError::Candle)?;
+        
+        // Create training data (just one sample for this test)
+        let training_data = vec![(input, target)];
+        
+        // Initialize the neural network
+        let mut network = SheafNN::init(0, false, LossKind::MSE, sheaf);
+        
+        // Add a single diffusion layer
+        let diffusion_layer = DiffusionLayer::new(0, Activations::Linear, &network.sheaf)?;
+        network.sequential(vec![diffusion_layer]);
+        // Train the network
+        let metrics = network.train_debug(
+            &training_data,
+            100,  // epochs
+            false,  // down_included
+            OptimKind::Adam,
+            0.01,  // learning rate
+            OptimizerParams::Else,
+        )?;
+        // Verify that training reduced the loss
+        assert!(metrics.final_loss < metrics.epochs[0].loss, 
+                "Training should reduce loss over time");
+        
+        // Test forward pass
+        let initial_input = network.sheaf.get_k_cochain(0)?;
+        let output = network.forward(initial_input, false)?;
+        
+        // The output should be different from input (diffusion occurred)
+        let input_vals = network.sheaf.get_k_cochain(0)?
+            .inner().to_vec2::<f32>().map_err(KohoError::Candle)?;
+        let output_vals = output.inner().to_vec2::<f32>().map_err(KohoError::Candle)?;
+        
+        println!("Input:  {:?}", input_vals);
+        println!("Output: {:?}", output_vals);
+        println!("Final loss: {}", metrics.final_loss);
+        
+        // Basic sanity checks
+        assert_eq!(output_vals.len(), 1, "Output should have 1 feature");
+        assert_eq!(output_vals[0].len(), 3, "Each vertex should have 3 vertices");
+        
+        Ok(())
+    }
+
+    #[test]
+    fn test_edge_diffusion_learning() -> Result<(), KohoError> {
+        let sheaf = create_triangle_sheaf()?;
+        
+        // Test diffusion on edges (1-cells)
+        let input = sheaf.get_k_cochain(1)?;  // Edge features
+        println!("got edges");
+        // Create a target where we want specific edge values
+        let target_data = vec![0.5f32, 0.3f32, 0.7f32];
+        let target = Matrix::from_slice(
+            &target_data, 
+            1, 3, 
+            Device::Cpu, 
+            DType::F32
+        ).map_err(KohoError::Candle)?;
+        
+        let training_data = vec![(input, target)];
+        
+        // Initialize network for 1-cell diffusion
+        let mut network = SheafNN::init(1, true, LossKind::MSE, sheaf);  // down_included = true
+        // Add diffusion layer for edges
+        let diffusion_layer = DiffusionLayer::new(1, Activations::Tanh, &network.sheaf)?;
+        network.sequential(vec![diffusion_layer]);
+        // Train
+        let metrics = network.train_debug(
+            &training_data,
+            10,  // epochs
+            true,  // down_included (use both up and down Laplacians)
+            OptimKind::Adam,
+            0.2,  // learning rate
+            OptimizerParams::Else,
+        )?;
+        println!("Edge diffusion final loss: {}", metrics.final_loss);
+        
+        // Verify training worked
+        assert!(metrics.final_loss < 1.0, "Loss should be reasonable");
+        
+        Ok(())
+    }
+
+    #[test]
+    fn test_learned_vs_fixed_restrictions() -> Result<(), KohoError> {
+        // Test 1: Network with learned restrictions
+        let sheaf_learned = create_triangle_sheaf()?;
+        assert!(sheaf_learned.learned, "Sheaf should have learned=true");
+        
+        // Test 2: Network with fixed restrictions  
+        let mut sheaf_fixed = create_triangle_sheaf()?;
+        sheaf_fixed.learned = false;
+        
+        let input = sheaf_learned.get_k_cochain(0)?;
+        let target_data = vec![0.8f32, 0.6f32, 0.4f32];
+        let target = Matrix::from_slice(&target_data, 1, 3, Device::Cpu, DType::F32)
+            .map_err(KohoError::Candle)?;
+        let training_data = vec![(input.clone(), target.clone())];
+        
+        // Train learned network
+        let mut network_learned = SheafNN::init(0, false, LossKind::MSE, sheaf_learned);
+        let layer_learned = DiffusionLayer::new(0, Activations::Linear, &network_learned.sheaf)?;
+        network_learned.sequential(vec![layer_learned]);
+        
+        let metrics_learned = network_learned.train(
+            &training_data, 50, false, OptimKind::Adam, 0.01, OptimizerParams::Else
+        )?;
+        
+        // Train fixed network
+        let mut network_fixed = SheafNN::init(0, false, LossKind::MSE, sheaf_fixed);
+        let layer_fixed = DiffusionLayer::new(0, Activations::Linear, &network_fixed.sheaf)?;
+        network_fixed.sequential(vec![layer_fixed]);
+        
+        let metrics_fixed = network_fixed.train_debug(
+            &training_data, 50, false, OptimKind::Adam, 0.01, OptimizerParams::Else
+        )?;
+        
+        println!("Learned restrictions final loss: {}", metrics_learned.final_loss);
+        println!("Fixed restrictions final loss: {}", metrics_fixed.final_loss);
+        
+        // The learned network should potentially perform better (lower loss)
+        // This isn't guaranteed but gives us insight into the difference
+        
+        Ok(())
+    }
+
+    #[test]
+    fn test_multiple_diffusion_layers() -> Result<(), KohoError> {
+        let sheaf = create_triangle_sheaf()?;
+        
+        let input = sheaf.get_k_cochain(0)?;
+        let target_data = vec![0.9f32, 0.8f32, 0.7f32];
+        let target = Matrix::from_slice(&target_data, 1, 3, Device::Cpu, DType::F32)
+            .map_err(KohoError::Candle)?;
+        let training_data = vec![(input, target)];
+        
+        // Create network with multiple layers
+        let mut network = SheafNN::init(0, false, LossKind::MSE, sheaf);
+        
+        let layer1 = DiffusionLayer::new(0, Activations::ReLU, &network.sheaf)?;
+        let layer2 = DiffusionLayer::new(0, Activations::Tanh, &network.sheaf)?;
+        let layer3 = DiffusionLayer::new(0, Activations::Linear, &network.sheaf)?;
+        
+        network.sequential(vec![layer1, layer2, layer3]);
+        
+        let metrics = network.train_debug(
+            &training_data, 75, false, OptimKind::Adam, 0.015, OptimizerParams::Else
+        )?;
+        
+        println!("Multi-layer network final loss: {}", metrics.final_loss);
+        
+        // Test that forward pass works with multiple layers
+        let test_input = network.sheaf.get_k_cochain(0)?;
+        let output = network.forward(test_input, false)?;
+        
+        assert_eq!(output.rows(), 1, "Output should have 3 vertices");
+        
+        Ok(())
     }
 }

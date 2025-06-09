@@ -74,7 +74,6 @@ impl DiffusionLayer {
         let diff = sheaf.k_hodge_laplacian(k, k_features, down_included)?;
         let weighted = self
             .weights
-            .as_tensor()
             .matmul(diff.inner())
             .map_err(KohoError::Candle)?;
         self.activation
