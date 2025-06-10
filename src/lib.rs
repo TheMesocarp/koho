@@ -164,8 +164,7 @@ impl SheafNN {
             let param_data = param.as_tensor().flatten_all().map_err(KohoError::Candle)?;
             let param_vec = param_data.to_vec1::<f32>().map_err(KohoError::Candle)?;
             println!(
-                "Parameter {}: shape={:?}, first_few_values={:?}",
-                i,
+                "Parameter {i}: shape={:?}, first_few_values={:?}",
                 param.shape(),
                 &param_vec[..param_vec.len().min(5)]
             );
@@ -182,7 +181,7 @@ impl SheafNN {
             let mut total_loss = 0.0_f32;
 
             for (batch_idx, (input, target)) in data.iter().enumerate() {
-                println!("\nEpoch {}, Batch {}", epoch, batch_idx);
+                println!("\nEpoch {epoch}, Batch {batch_idx}");
 
                 // Print input/target info
                 let input_data = input.inner().flatten_all().map_err(KohoError::Candle)?;
@@ -190,14 +189,14 @@ impl SheafNN {
                 let input_vec = input_data.to_vec1::<f32>().map_err(KohoError::Candle)?;
                 let target_vec = target_data.to_vec1::<f32>().map_err(KohoError::Candle)?;
 
-                println!("Input: {:?}", input_vec);
-                println!("Target: {:?}", target_vec);
+                println!("Input: {input_vec:?}");
+                println!("Target: {target_vec:?}");
 
                 // Forward pass
                 let output = self.forward(input.clone(), down_included)?;
                 let output_data = output.inner().flatten_all().map_err(KohoError::Candle)?;
                 let output_vec = output_data.to_vec1::<f32>().map_err(KohoError::Candle)?;
-                println!("Output: {:?}", output_vec);
+                println!("Output: {output_vec:?}");
 
                 // Compute loss
                 let loss_tensor = self
@@ -226,13 +225,11 @@ impl SheafNN {
                         let grad_vec = grad_data.to_vec1::<f32>().map_err(KohoError::Candle)?;
                         let grad_norm = grad_vec.iter().map(|x| x * x).sum::<f32>().sqrt();
                         println!(
-                            "  Param {}: grad_norm={}, first_few_grads={:?}",
-                            i,
-                            grad_norm,
+                            "  Param {i}: grad_norm={grad_norm}, first_few_grads={:?}",
                             &grad_vec[..grad_vec.len().min(3)]
                         );
                     } else {
-                        println!("  Param {}: NO GRADIENT FOUND", i);
+                        println!("  Param {i}: NO GRADIENT FOUND");
                     }
                 }
 
@@ -276,12 +273,12 @@ impl SheafNN {
                         .map(|(b, a)| (b - a).powi(2))
                         .sum::<f32>()
                         .sqrt();
-                    println!("  Param {} change norm: {}", i, diff_norm);
+                    println!("  Param {i} change norm: {diff_norm}");
                 }
 
                 if epoch <= 3 {
                     // Only print detailed info for first few epochs
-                    println!("--- End batch {} ---", batch_idx);
+                    println!("--- End batch {batch_idx} ---");
                 }
             }
 
@@ -289,7 +286,7 @@ impl SheafNN {
             metrics.push(EpochMetrics::new(epoch, avg_loss));
 
             if epoch <= 10 || epoch % 10 == 0 {
-                println!("Epoch {}: avg_loss = {}", epoch, avg_loss);
+                println!("Epoch {epoch}: avg_loss = {avg_loss}");
             }
         }
         Ok(metrics)
@@ -419,8 +416,8 @@ mod integration_tests {
             .map_err(KohoError::Candle)?;
         let output_vals = output.inner().to_vec2::<f32>().map_err(KohoError::Candle)?;
 
-        println!("Input:  {:?}", input_vals);
-        println!("Output: {:?}", output_vals);
+        println!("Input:  {input_vals:?}");
+        println!("Output: {output_vals:?}");
         println!("Final loss: {}", metrics.final_loss);
 
         assert_eq!(output_vals.len(), 1, "Output should have 1 feature");
