@@ -1,7 +1,8 @@
+#[derive(Debug)]
 /// Metrics collected each epoch
 pub struct EpochMetrics {
-    epoch: usize,
-    loss: f32,
+    pub epoch: usize,
+    pub loss: f32,
     // will probs need to add some extra metrics beyond loss
 }
 
@@ -11,6 +12,7 @@ impl EpochMetrics {
     }
 }
 
+#[derive(Debug)]
 /// Metrics collected during a `train()` run
 pub struct TrainingMetrics {
     pub epochs: Vec<EpochMetrics>,
