@@ -206,7 +206,7 @@ impl SheafNN {
 
                 let loss_val = loss_tensor.to_scalar::<f32>().unwrap_or(f32::NAN);
                 total_loss += loss_val;
-                println!("Loss: {}", loss_val);
+                println!("Loss: {loss_val}");
 
                 // Check if loss tensor requires grad
                 println!("Loss tensor shape: {:?}", loss_tensor.shape());
