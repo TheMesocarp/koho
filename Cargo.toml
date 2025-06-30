@@ -5,10 +5,10 @@ description = "A deep learning model for spectral diffusion over k-cells in arbi
 edition = "2021"
 homepage = "https://github.com/TheMesocarp/koho"
 keywords = [
-  "machine_learning",
+  "ml",
   "deep_learning",
   "spectral_diffusion",
-  "sheaf_neural_networks",
+  "sheaves",
   "TDA",
 ]
 license = "AGPL-3.0"
@@ -20,7 +20,6 @@ version = "0.1.0"
 
 [dependencies]
 thiserror = "2.0.12"
-num-complex = "0.4.6"
 rand = "0.9.0"
 candle-core = "0.9.1"
 candle-nn = "0.9.1"
