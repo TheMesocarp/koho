@@ -4,13 +4,7 @@ authors = ["Mesocarp"]
 description = "A deep learning model for spectral diffusion over k-cells in arbitrary cell complexes, built on `candle`"
 edition = "2021"
 homepage = "https://github.com/TheMesocarp/koho"
-keywords = [
-  "ml",
-  "deep_learning",
-  "spectral_diffusion",
-  "sheaves",
-  "TDA",
-]
+keywords = ["ml", "deep_learning", "spectral_diffusion", "sheaves", "TDA"]
 license = "AGPL-3.0"
 name = "koho"
 readme = "README.md"
