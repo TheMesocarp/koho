@@ -1,5 +1,4 @@
 use candle_core::{backprop::GradStore, Result as CandleResult, Var};
-use candle_optimisers::{Decay, Momentum};
 
 pub use crate::nn::optim::adam::Adam;
 pub use crate::nn::optim::rmsprop::RMSprop;
@@ -8,6 +7,23 @@ pub use crate::nn::optim::sgd::SGD;
 mod adam;
 mod rmsprop;
 mod sgd;
+
+#[derive(Clone, Copy, Debug, PartialEq, PartialOrd)]
+pub enum Decay {
+    /// Weight decay regularisation to penalise large weights
+    WeightDecay(f64),
+    /// Decoupled weight decay as described in [Decoupled Weight Decay Regularization](https://arxiv.org/abs/1711.05101)
+    DecoupledWeightDecay(f64),
+}
+
+/// Type of momentum to use
+#[derive(Copy, Clone, Debug, PartialEq, PartialOrd)]
+pub enum Momentum {
+    /// classical momentum
+    Classical(f64),
+    /// nesterov momentum
+    Nesterov(f64),
+}
 
 /// Trait for optimizers that work with mutable references to variables
 pub trait Optimizer {
