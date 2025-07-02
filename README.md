@@ -1,4 +1,5 @@
 # koho
+[![Crates.io - koho](https://img.shields.io/crates/v/koho?label=koho)](https://crates.io/crates/koho)
 [![License: AGPL v3.0](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
 
 Sheaf neural networks and other exotic diffusion models, built on `candle`. 
