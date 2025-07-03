@@ -34,9 +34,7 @@ impl Section {
         device: Device,
         dtype: DType,
     ) -> Result<Self, KohoError> {
-        Ok(Self(
-            Vector::from_slice(tensor, dimension, device, dtype).map_err(KohoError::Candle)?,
-        ))
+        Ok(Self(Vector::from_slice(tensor, dimension, device, dtype)?))
     }
 }
 
@@ -158,23 +156,19 @@ impl CellularSheaf {
             let stalk_dim = sections[0].0.dimension();
             let stalk_dim_upper = upper_sections[0].0.dimension();
 
-            let id = Matrix::identity(stalk_dim_upper, stalk_dim, self.device.clone(), self.dtype)
-                .map_err(KohoError::Candle)?;
+            let id = Matrix::identity(stalk_dim_upper, stalk_dim, self.device.clone(), self.dtype)?;
 
             for (j, _) in sections.iter().enumerate() {
                 let (uppers, _) = self.cells.incidences(i, j)?;
                 for k in uppers {
                     let noise =
-                        Matrix::rand(stalk_dim_upper, stalk_dim, self.device.clone(), self.dtype)
-                            .map_err(KohoError::Candle)?
-                            .scale(noise_limit)
-                            .map_err(KohoError::Candle)?;
+                        Matrix::rand(stalk_dim_upper, stalk_dim, self.device.clone(), self.dtype)?
+                            .scale(noise_limit)?;
                     let fix = VarMatrix::new(
-                        id.clone().add(&noise).map_err(KohoError::Candle)?.tensor,
+                        id.clone().add(&noise)?.tensor,
                         self.device.clone(),
                         self.dtype,
-                    )
-                    .map_err(KohoError::Candle)?;
+                    )?;
 
                     self.restrictions.insert((i, j, i + 1, *k), fix);
                 }
@@ -213,8 +207,7 @@ impl CellularSheaf {
                 stalk_dim_output,
                 self.device.clone(),
                 self.dtype
-            )
-            .map_err(KohoError::Candle)?;
+            )?;
             num_k_plus_1_cells
         ];
         let tau_dim = k + 1;
@@ -222,18 +215,15 @@ impl CellularSheaf {
             let (upper, _) = self.cells.incidences(k, sigma_idx)?;
             for i in upper {
                 if let Some(r) = self.restrictions.get(&(k, sigma_idx, tau_dim, *i)) {
-                    let mut term = r.matvec(section).map_err(KohoError::Candle)?;
+                    let mut term = r.matvec(section)?;
                     if let Some(incidence_sign) = self.interlinked.get(&(k, sigma_idx, tau_dim, *i))
                     {
                         if *incidence_sign < 0 {
-                            let new = term.inner().neg().map_err(KohoError::Candle)?;
-                            term = Vector::new(new, self.device.clone(), self.dtype)
-                                .map_err(KohoError::Candle)?;
+                            let new = term.inner().neg()?;
+                            term = Vector::new(new, self.device.clone(), self.dtype)?;
                         }
                     }
-                    output_k_plus_1_cochain[*i] = output_k_plus_1_cochain[*i]
-                        .add(&term)
-                        .map_err(KohoError::Candle)?;
+                    output_k_plus_1_cochain[*i] = output_k_plus_1_cochain[*i].add(&term)?;
                 }
             }
         }
@@ -271,8 +261,7 @@ impl CellularSheaf {
                 stalk_dim_output,
                 self.device.clone(),
                 self.dtype
-            )
-            .map_err(KohoError::Candle)?;
+            )?;
             num_k_cells
         ];
 
@@ -285,21 +274,18 @@ impl CellularSheaf {
                     .restrictions
                     .get(&(k, *sigma_idx, tau_cell_dim, tau_idx))
                 {
-                    let mut term = r.transpose_matvec(y_tau).map_err(KohoError::Candle)?;
+                    let mut term = r.transpose_matvec(y_tau)?;
                     if let Some(incidence_sign) =
                         self.interlinked
                             .get(&(k, *sigma_idx, tau_cell_dim, tau_idx))
                     {
                         if *incidence_sign < 0 {
-                            let new = term.inner().neg().map_err(KohoError::Candle)?;
-                            term = Vector::new(new, self.device.clone(), self.dtype)
-                                .map_err(KohoError::Candle)?;
+                            let new = term.inner().neg()?;
+                            term = Vector::new(new, self.device.clone(), self.dtype)?;
                         }
                     }
 
-                    output_k_cochain[*sigma_idx] = output_k_cochain[*sigma_idx]
-                        .add(&term)
-                        .map_err(KohoError::Candle)?;
+                    output_k_cochain[*sigma_idx] = output_k_cochain[*sigma_idx].add(&term)?;
                 }
             }
         }
@@ -341,7 +327,7 @@ impl CellularSheaf {
         k_cochain: Matrix,
         down_included: bool,
     ) -> Result<Matrix, KohoError> {
-        let vecs = k_cochain.to_vectors().map_err(KohoError::Candle)?;
+        let vecs = k_cochain.to_vectors()?;
 
         let k_plus_stalk_dim = self.section_spaces[k + 1][0].0.dimension();
         let k_stalk_dim = self.section_spaces[k][0].0.dimension();
@@ -352,10 +338,7 @@ impl CellularSheaf {
             let k_minus_stalk_dim = self.section_spaces[k - 1][0].0.dimension();
             let down_a = self.k_adjoint_coboundary(k - 1, vecs, k_minus_stalk_dim)?;
             let down_b = self.k_coboundary(k - 1, down_a, k_stalk_dim)?;
-            let out = Matrix::from_vecs(up_b)
-                .map_err(KohoError::Candle)?
-                .add(&Matrix::from_vecs(down_b).map_err(KohoError::Candle)?)
-                .map_err(KohoError::Candle)?;
+            let out = Matrix::from_vecs(up_b)?.add(&Matrix::from_vecs(down_b)?)?;
             return Ok(out);
         }
         Matrix::from_vecs(up_b).map_err(KohoError::Candle)
@@ -496,12 +479,10 @@ mod tests {
         let (_, e_idx) = sheaf.attach(Cell::new(1), e_data, None, Some(&[v0_idx, v1_idx]))?;
 
         // Set restrictions
-        let r_v0 = VarMatrix::from_slice(&[1.0f32], 1, 1, Device::Cpu, DType::F32)
-            .map_err(KohoError::Candle)?;
+        let r_v0 = VarMatrix::from_slice(&[1.0f32], 1, 1, Device::Cpu, DType::F32)?;
         sheaf.set_restriction(0, v0_idx, e_idx, r_v0, 1)?;
 
-        let r_v1 = VarMatrix::from_slice(&[-1.0f32], 1, 1, Device::Cpu, DType::F32)
-            .map_err(KohoError::Candle)?;
+        let r_v1 = VarMatrix::from_slice(&[-1.0f32], 1, 1, Device::Cpu, DType::F32)?;
         sheaf.set_restriction(0, v1_idx, e_idx, r_v1, -1)?;
 
         Ok(sheaf)
@@ -510,22 +491,14 @@ mod tests {
     #[test]
     fn test_coboundary_computation() -> Result<(), KohoError> {
         let sheaf = setup_simple_sheaf()?;
-        let k_cochain = sheaf
-            .get_k_cochain(0)?
-            .to_vectors()
-            .map_err(KohoError::Candle)?;
+        let k_cochain = sheaf.get_k_cochain(0)?.to_vectors()?;
         assert_eq!(k_cochain.len(), 2, "Should have two 0-cells");
 
         let result = sheaf.k_coboundary(0, k_cochain, 1)?;
         assert_eq!(result.len(), 1, "Should have one 1-cell");
 
         // Verify edge value: 1*1.0 (from v0) + (-1)*2.0 (from v1) = -1.0
-        let edge_value = result[0]
-            .inner()
-            .squeeze(1)
-            .map_err(KohoError::Candle)?
-            .to_vec1::<f32>()
-            .map_err(KohoError::Candle)?[0];
+        let edge_value = result[0].inner().squeeze(1)?.to_vec1::<f32>()?[0];
         assert!(
             (edge_value - (3.0f32)).abs() < 1e-6,
             "Edge value mismatch, got: {edge_value}"
@@ -563,12 +536,10 @@ mod adjoint_and_laplacian_tests {
         let (_, e0_idx) = sheaf.attach(Cell::new(1), e0_data, None, Some(&[v0_idx, v1_idx]))?;
 
         // Set restrictions
-        let r_v0_e0 = VarMatrix::from_slice(&[2.0f32], 1, 1, Device::Cpu, DType::F32)
-            .map_err(KohoError::Candle)?;
+        let r_v0_e0 = VarMatrix::from_slice(&[2.0f32], 1, 1, Device::Cpu, DType::F32)?;
         sheaf.set_restriction(0, v0_idx, e0_idx, r_v0_e0, 1)?;
 
-        let r_v1_e0 = VarMatrix::from_slice(&[3.0f32], 1, 1, Device::Cpu, DType::F32)
-            .map_err(KohoError::Candle)?;
+        let r_v1_e0 = VarMatrix::from_slice(&[3.0f32], 1, 1, Device::Cpu, DType::F32)?;
         sheaf.set_restriction(0, v1_idx, e0_idx, r_v1_e0, -1)?;
 
         Ok(sheaf)
@@ -577,10 +548,8 @@ mod adjoint_and_laplacian_tests {
     #[test]
     fn test_k_coboundary_simple() -> Result<(), KohoError> {
         let sheaf = create_line_sheaf()?;
-        let v0 =
-            Vector::from_slice(&[1.0f32], 1, Device::Cpu, DType::F32).map_err(KohoError::Candle)?;
-        let v1 =
-            Vector::from_slice(&[2.0f32], 1, Device::Cpu, DType::F32).map_err(KohoError::Candle)?;
+        let v0 = Vector::from_slice(&[1.0f32], 1, Device::Cpu, DType::F32)?;
+        let v1 = Vector::from_slice(&[2.0f32], 1, Device::Cpu, DType::F32)?;
         let vertex_cochain = vec![v0, v1];
 
         let edge_cochain = sheaf.k_coboundary(0, vertex_cochain, 1)?;
@@ -590,12 +559,9 @@ mod adjoint_and_laplacian_tests {
         // Expected: 2.0 * 1.0 + (-1) * 3.0 * 2.0 = 2.0 - 6.0 = -4.0
         let edge_val = edge_cochain[0]
             .inner()
-            .squeeze(1)
-            .map_err(KohoError::Candle)?
-            .squeeze(0)
-            .map_err(KohoError::Candle)?
-            .to_scalar::<f32>()
-            .map_err(KohoError::Candle)?;
+            .squeeze(1)?
+            .squeeze(0)?
+            .to_scalar::<f32>()?;
         println!("here we are after edge val");
         println!("Coboundary result: {edge_val}");
         assert!(
@@ -609,8 +575,7 @@ mod adjoint_and_laplacian_tests {
     #[test]
     fn test_k_adjoint_coboundary_simple() -> Result<(), KohoError> {
         let sheaf = create_line_sheaf()?;
-        let e0 =
-            Vector::from_slice(&[5.0f32], 1, Device::Cpu, DType::F32).map_err(KohoError::Candle)?;
+        let e0 = Vector::from_slice(&[5.0f32], 1, Device::Cpu, DType::F32)?;
         let edge_cochain = vec![e0];
 
         let vertex_cochain = sheaf.k_adjoint_coboundary(0, edge_cochain, 1)?;
@@ -620,22 +585,16 @@ mod adjoint_and_laplacian_tests {
         // For v0: transpose(r_v0_e0) * e0 * orientation = 2.0 * 5.0 * 1 = 10.0
         let v0_val = vertex_cochain[0]
             .inner()
-            .squeeze(1)
-            .map_err(KohoError::Candle)?
-            .squeeze(0)
-            .map_err(KohoError::Candle)?
-            .to_scalar::<f32>()
-            .map_err(KohoError::Candle)?;
+            .squeeze(1)?
+            .squeeze(0)?
+            .to_scalar::<f32>()?;
 
         // For v1: transpose(r_v1_e0) * e0 * orientation = 3.0 * 5.0 * (-1) = -15.0
         let v1_val = vertex_cochain[1]
             .inner()
-            .squeeze(1)
-            .map_err(KohoError::Candle)?
-            .squeeze(0)
-            .map_err(KohoError::Candle)?
-            .to_scalar::<f32>()
-            .map_err(KohoError::Candle)?;
+            .squeeze(1)?
+            .squeeze(0)?
+            .to_scalar::<f32>()?;
 
         println!("Adjoint coboundary results: v0={v0_val}, v1={v1_val}");
         assert!(
@@ -653,8 +612,7 @@ mod adjoint_and_laplacian_tests {
     #[test]
     fn test_k_hodge_laplacian_up_only() -> Result<(), KohoError> {
         let sheaf = create_line_sheaf()?;
-        let input = Matrix::from_slice(&[1.0f32, 2.0f32], 1, 2, Device::Cpu, DType::F32)
-            .map_err(KohoError::Candle)?;
+        let input = Matrix::from_slice(&[1.0f32, 2.0f32], 1, 2, Device::Cpu, DType::F32)?;
 
         let result = sheaf.k_hodge_laplacian(0, input, false)?;
 
@@ -666,7 +624,7 @@ mod adjoint_and_laplacian_tests {
         //    v0: 2.0 * (-4.0) * 1 = -8.0
         //    v1: 3.0 * (-4.0) * (-1) = 12.0
 
-        let result_vec = result.inner().to_vec2::<f32>().map_err(KohoError::Candle)?;
+        let result_vec = result.inner().to_vec2::<f32>()?;
         println!("Hodge Laplacian result: {result_vec:?}");
 
         assert_eq!(result_vec.len(), 1, "Should have 1 row");
@@ -721,8 +679,7 @@ mod adjoint_and_laplacian_tests {
             for e in 0..3 {
                 let (_, lower) = sheaf.cells.incidences(1, e)?;
                 if lower.contains(&v) {
-                    let r = VarMatrix::identity(1, 1, Device::Cpu, DType::F32)
-                        .map_err(KohoError::Candle)?;
+                    let r = VarMatrix::identity(1, 1, Device::Cpu, DType::F32)?;
                     sheaf.set_restriction(0, v, e, r, 1)?;
                 }
             }
@@ -746,22 +703,18 @@ mod adjoint_and_laplacian_tests {
     #[test]
     fn test_adjoint_with_zero_restriction() -> Result<(), KohoError> {
         let mut sheaf = create_line_sheaf()?;
-        let zero_r = VarMatrix::zeros(1, 1, Device::Cpu, DType::F32).map_err(KohoError::Candle)?;
+        let zero_r = VarMatrix::zeros(1, 1, Device::Cpu, DType::F32)?;
         sheaf.set_restriction(0, 0, 0, zero_r, 1)?;
-        let e0 =
-            Vector::from_slice(&[5.0f32], 1, Device::Cpu, DType::F32).map_err(KohoError::Candle)?;
+        let e0 = Vector::from_slice(&[5.0f32], 1, Device::Cpu, DType::F32)?;
         let edge_cochain = vec![e0];
 
         let vertex_cochain = sheaf.k_adjoint_coboundary(0, edge_cochain, 1)?;
 
         let v0_val = vertex_cochain[0]
             .inner()
-            .squeeze(1)
-            .map_err(KohoError::Candle)?
-            .squeeze(0)
-            .map_err(KohoError::Candle)?
-            .to_scalar::<f32>()
-            .map_err(KohoError::Candle)?;
+            .squeeze(1)?
+            .squeeze(0)?
+            .to_scalar::<f32>()?;
 
         println!("v0 with zero restriction: {v0_val}");
         assert!(v0_val.abs() < 1e-6, "v0 should be 0, got {v0_val}");
@@ -772,8 +725,7 @@ mod adjoint_and_laplacian_tests {
     #[test]
     fn test_dimensions_preserved() -> Result<(), KohoError> {
         let sheaf = create_line_sheaf()?;
-        let input = Matrix::from_slice(&[3.0f32, 4.0f32], 1, 2, Device::Cpu, DType::F32)
-            .map_err(KohoError::Candle)?;
+        let input = Matrix::from_slice(&[3.0f32, 4.0f32], 1, 2, Device::Cpu, DType::F32)?;
 
         let result = sheaf.k_hodge_laplacian(0, input.clone(), false)?;
 
@@ -874,12 +826,9 @@ mod generated_restrictions_tests {
             let value = restriction
                 .inner()
                 .as_tensor()
-                .squeeze(0)
-                .map_err(KohoError::Candle)?
-                .squeeze(0)
-                .map_err(KohoError::Candle)?
-                .to_scalar::<f32>()
-                .map_err(KohoError::Candle)?;
+                .squeeze(0)?
+                .squeeze(0)?
+                .to_scalar::<f32>()?;
 
             println!("Restriction ({from_dim},{from_idx}) -> ({to_dim},{to_idx}): {value}");
 
@@ -905,7 +854,7 @@ mod generated_restrictions_tests {
         );
 
         // Convert to vectors for coboundary computation
-        let vertex_vectors = vertex_cochain.to_vectors().map_err(KohoError::Candle)?;
+        let vertex_vectors = vertex_cochain.to_vectors()?;
 
         // Compute 0-coboundary (vertices -> edges)
         let edge_cochain = sheaf.k_coboundary(0, vertex_vectors, 1)?;
@@ -915,12 +864,9 @@ mod generated_restrictions_tests {
         for (i, edge_val) in edge_cochain.iter().enumerate() {
             let val = edge_val
                 .inner()
-                .squeeze(1)
-                .map_err(KohoError::Candle)?
-                .squeeze(0)
-                .map_err(KohoError::Candle)?
-                .to_scalar::<f32>()
-                .map_err(KohoError::Candle)?;
+                .squeeze(1)?
+                .squeeze(0)?
+                .to_scalar::<f32>()?;
             println!("Edge {i}: {val}");
 
             // Edge values should be reasonable (not NaN or infinite)
@@ -947,7 +893,7 @@ mod generated_restrictions_tests {
             "Hodge Laplacian should preserve dimensions"
         );
 
-        let result_vals = result.inner().to_vec2::<f32>().map_err(KohoError::Candle)?;
+        let result_vals = result.inner().to_vec2::<f32>()?;
         println!("Hodge Laplacian result: {result_vals:?}");
 
         // Values should be finite
@@ -994,12 +940,9 @@ mod generated_restrictions_tests {
                 let value = restriction
                     .inner()
                     .as_tensor()
-                    .squeeze(0)
-                    .map_err(KohoError::Candle)?
-                    .squeeze(0)
-                    .map_err(KohoError::Candle)?
-                    .to_scalar::<f32>()
-                    .map_err(KohoError::Candle)?;
+                    .squeeze(0)?
+                    .squeeze(0)?
+                    .to_scalar::<f32>()?;
 
                 // Should be 1.0 ± noise_level (approximately)
                 let deviation = (value - 1.0).abs();
@@ -1035,12 +978,9 @@ mod generated_restrictions_tests {
             let value = restriction
                 .inner()
                 .as_tensor()
-                .squeeze(0)
-                .map_err(KohoError::Candle)?
-                .squeeze(0)
-                .map_err(KohoError::Candle)?
-                .to_scalar::<f32>()
-                .map_err(KohoError::Candle)?;
+                .squeeze(0)?
+                .squeeze(0)?
+                .to_scalar::<f32>()?;
 
             assert!(
                 (value - 1.0).abs() < 1e-6,

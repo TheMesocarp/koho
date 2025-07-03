@@ -110,8 +110,7 @@ impl SheafNN {
     ) -> Result<TrainingMetrics, KohoError> {
         // Create the optimizer
         let mut optimizer =
-            create_optimizer(optimizer_kind, self.parameters_mut(), lr, optimizer_params)
-                .map_err(KohoError::Candle)?;
+            create_optimizer(optimizer_kind, self.parameters_mut(), lr, optimizer_params)?;
 
         let mut metrics = TrainingMetrics::new(epochs);
 
@@ -123,21 +122,16 @@ impl SheafNN {
                 let output = self.forward(input.clone(), down_included)?;
 
                 // Compute loss
-                let loss_tensor = self
-                    .loss_fn
-                    .compute(output.inner(), target.inner())
-                    .map_err(KohoError::Candle)?;
+                let loss_tensor = self.loss_fn.compute(output.inner(), target.inner())?;
 
                 let loss_val = loss_tensor.to_scalar::<f32>().unwrap_or(f32::NAN);
                 total_loss += loss_val;
 
                 // Backward pass
-                let grads = loss_tensor.backward().map_err(KohoError::Candle)?;
+                let grads = loss_tensor.backward()?;
 
                 // Optimizer step (in-place update of parameters)
-                optimizer
-                    .step(&grads, self.parameters_mut())
-                    .map_err(KohoError::Candle)?;
+                optimizer.step(&grads, self.parameters_mut())?;
             }
 
             let avg_loss = total_loss / (data.len() as f32);
@@ -161,8 +155,8 @@ impl SheafNN {
         let params = self.parameters();
         println!("Total parameters: {}", params.len());
         for (i, param) in params.iter().enumerate() {
-            let param_data = param.as_tensor().flatten_all().map_err(KohoError::Candle)?;
-            let param_vec = param_data.to_vec1::<f32>().map_err(KohoError::Candle)?;
+            let param_data = param.as_tensor().flatten_all()?;
+            let param_vec = param_data.to_vec1::<f32>()?;
             println!(
                 "Parameter {i}: shape={:?}, first_few_values={:?}",
                 param.shape(),
@@ -172,8 +166,7 @@ impl SheafNN {
 
         // Create the optimizer
         let mut optimizer =
-            create_optimizer(optimizer_kind, self.parameters_mut(), lr, optimizer_params)
-                .map_err(KohoError::Candle)?;
+            create_optimizer(optimizer_kind, self.parameters_mut(), lr, optimizer_params)?;
 
         let mut metrics = TrainingMetrics::new(epochs);
 
@@ -184,25 +177,22 @@ impl SheafNN {
                 println!("\nEpoch {epoch}, Batch {batch_idx}");
 
                 // Print input/target info
-                let input_data = input.inner().flatten_all().map_err(KohoError::Candle)?;
-                let target_data = target.inner().flatten_all().map_err(KohoError::Candle)?;
-                let input_vec = input_data.to_vec1::<f32>().map_err(KohoError::Candle)?;
-                let target_vec = target_data.to_vec1::<f32>().map_err(KohoError::Candle)?;
+                let input_data = input.inner().flatten_all()?;
+                let target_data = target.inner().flatten_all()?;
+                let input_vec = input_data.to_vec1::<f32>()?;
+                let target_vec = target_data.to_vec1::<f32>()?;
 
                 println!("Input: {input_vec:?}");
                 println!("Target: {target_vec:?}");
 
                 // Forward pass
                 let output = self.forward(input.clone(), down_included)?;
-                let output_data = output.inner().flatten_all().map_err(KohoError::Candle)?;
-                let output_vec = output_data.to_vec1::<f32>().map_err(KohoError::Candle)?;
+                let output_data = output.inner().flatten_all()?;
+                let output_vec = output_data.to_vec1::<f32>()?;
                 println!("Output: {output_vec:?}");
 
                 // Compute loss
-                let loss_tensor = self
-                    .loss_fn
-                    .compute(output.inner(), target.inner())
-                    .map_err(KohoError::Candle)?;
+                let loss_tensor = self.loss_fn.compute(output.inner(), target.inner())?;
 
                 let loss_val = loss_tensor.to_scalar::<f32>().unwrap_or(f32::NAN);
                 total_loss += loss_val;
@@ -214,15 +204,15 @@ impl SheafNN {
 
                 // Backward pass
                 println!("Computing gradients...");
-                let grads = loss_tensor.backward().map_err(KohoError::Candle)?;
+                let grads = loss_tensor.backward()?;
 
                 // Check gradients
                 let params_mut = self.parameters_mut();
                 println!("Checking gradients for {} parameters:", params_mut.len());
                 for (i, param) in params_mut.iter().enumerate() {
                     if let Some(grad) = grads.get(param) {
-                        let grad_data = grad.flatten_all().map_err(KohoError::Candle)?;
-                        let grad_vec = grad_data.to_vec1::<f32>().map_err(KohoError::Candle)?;
+                        let grad_data = grad.flatten_all()?;
+                        let grad_vec = grad_data.to_vec1::<f32>()?;
                         let grad_norm = grad_vec.iter().map(|x| x * x).sum::<f32>().sqrt();
                         println!(
                             "  Param {i}: grad_norm={grad_norm}, first_few_grads={:?}",
@@ -247,9 +237,7 @@ impl SheafNN {
                     })
                     .collect();
 
-                optimizer
-                    .step(&grads, self.parameters_mut())
-                    .map_err(KohoError::Candle)?;
+                optimizer.step(&grads, self.parameters_mut())?;
 
                 let params_after: Vec<_> = self
                     .parameters_mut()
@@ -382,8 +370,7 @@ mod integration_tests {
         let input = sheaf.get_k_cochain(0)?;
 
         let target_data = vec![0.8f32, 0.6f32, 0.4f32];
-        let target = Matrix::from_slice(&target_data, 1, 3, Device::Cpu, DType::F32)
-            .map_err(KohoError::Candle)?;
+        let target = Matrix::from_slice(&target_data, 1, 3, Device::Cpu, DType::F32)?;
 
         let training_data = vec![(input, target)];
         let mut network = SheafNN::init(0, false, LossKind::MSE, sheaf);
@@ -408,13 +395,8 @@ mod integration_tests {
         let output = network.forward(initial_input, false)?;
 
         // The output should be different from input (diffusion occurred)
-        let input_vals = network
-            .sheaf
-            .get_k_cochain(0)?
-            .inner()
-            .to_vec2::<f32>()
-            .map_err(KohoError::Candle)?;
-        let output_vals = output.inner().to_vec2::<f32>().map_err(KohoError::Candle)?;
+        let input_vals = network.sheaf.get_k_cochain(0)?.inner().to_vec2::<f32>()?;
+        let output_vals = output.inner().to_vec2::<f32>()?;
 
         println!("Input:  {input_vals:?}");
         println!("Output: {output_vals:?}");
@@ -439,8 +421,7 @@ mod integration_tests {
         println!("got edges");
 
         let target_data = vec![0.5f32, 0.3f32, 0.7f32];
-        let target = Matrix::from_slice(&target_data, 1, 3, Device::Cpu, DType::F32)
-            .map_err(KohoError::Candle)?;
+        let target = Matrix::from_slice(&target_data, 1, 3, Device::Cpu, DType::F32)?;
 
         let training_data = vec![(input, target)];
 
@@ -473,8 +454,7 @@ mod integration_tests {
         let input = sheaf_learned.get_k_cochain(0)?;
 
         let target_data = vec![0.8f32, 0.6f32, 0.4f32];
-        let target = Matrix::from_slice(&target_data, 1, 3, Device::Cpu, DType::F32)
-            .map_err(KohoError::Candle)?;
+        let target = Matrix::from_slice(&target_data, 1, 3, Device::Cpu, DType::F32)?;
         let training_data = vec![(input.clone(), target.clone())];
 
         // train learned network
@@ -523,8 +503,7 @@ mod integration_tests {
         let input = sheaf.get_k_cochain(0)?;
 
         let target_data = vec![0.9f32, 0.8f32, 0.7f32];
-        let target = Matrix::from_slice(&target_data, 1, 3, Device::Cpu, DType::F32)
-            .map_err(KohoError::Candle)?;
+        let target = Matrix::from_slice(&target_data, 1, 3, Device::Cpu, DType::F32)?;
         let training_data = vec![(input, target)];
 
         let mut network = SheafNN::init(0, false, LossKind::MSE, sheaf);

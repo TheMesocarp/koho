@@ -43,8 +43,8 @@ impl DiffusionLayer {
         let device = sheaf.device.clone();
         let dtype = sheaf.dtype;
         let dim = sheaf.section_spaces[k][0].0.dimension();
-        let weights = Matrix::rand(dim, dim, device, dtype).map_err(KohoError::Candle)?;
-        let weights = Var::from_tensor(weights.inner()).map_err(KohoError::Candle)?;
+        let weights = Matrix::rand(dim, dim, device, dtype)?;
+        let weights = Var::from_tensor(weights.inner())?;
         Ok(Self {
             weights,
             activation,
@@ -72,10 +72,7 @@ impl DiffusionLayer {
         down_included: bool,
     ) -> Result<Matrix, KohoError> {
         let diff = sheaf.k_hodge_laplacian(k, k_features, down_included)?;
-        let weighted = self
-            .weights
-            .matmul(diff.inner())
-            .map_err(KohoError::Candle)?;
+        let weighted = self.weights.matmul(diff.inner())?;
         self.activation
             .activate(weighted)
             .map_err(KohoError::Candle)
