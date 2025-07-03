@@ -22,8 +22,6 @@ pub enum KohoError {
     NoRestrictionDefined,
     #[error("Sections for layer {i} are not yet provided")]
     NoSections { i: usize },
-    #[error("Candle module error")]
-    Candle(Error),
-    #[error("Misc")]
-    Msg(String),
+    #[error("Candle module error {0}")]
+    Candle(#[from] Error),
 }

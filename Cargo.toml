@@ -9,7 +9,7 @@ license = "AGPL-3.0"
 name = "koho"
 readme = "README.md"
 repository = "https://github.com/TheMesocarp/koho"
-version = "0.1.0"
+version = "0.1.1"
 
 
 [dependencies]
