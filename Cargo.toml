@@ -14,6 +14,6 @@ version = "0.1.1"
 
 [dependencies]
 thiserror = "2.0.12"
-rand = "0.9.0"
-candle-core = "0.9.1"
-candle-nn = "0.9.1"
+rand = "0.10.3"
+candle-core = "0.11.0"
+candle-nn = "0.11.0"
